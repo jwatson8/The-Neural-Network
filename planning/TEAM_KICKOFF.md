@@ -1,21 +1,21 @@
 # The Neural Network — kickoff pack
 
-Team: jwatson8, Nathan, Frank, Alvajoy. Repository:
+Team: jwatson8, Nathan (@cheepsahoy), Frank (@franktsai127), Alvajoy (@AlvajoyAsante). Repository:
 [The-Neural-Network](https://github.com/jwatson8/The-Neural-Network).
 
 **Deadline: Sunday October 11, 2026, 11:59 PM Eastern (8:59 PM Pacific).**
 Internal submission target: 11:00 PM Eastern. All task dates below use Eastern.
 Ownership is proposed, not yet agreed by the team. Update issues and meeting notes
-when assignments are accepted. GitHub usernames are needed to assign teammates.
+when assignments are accepted. GitHub usernames are now recorded. Assignments requiring repository invitation acceptance are noted on issues. Team roles are confirmed; technical work allocations remain proposals.
 
 ## Proposed work areas
 
 | Person | Lead responsibility | Reviewer / pairing |
 |---|---|---|
-| jwatson8 | Coordination, live cold-start automation, final audit and submission | Pair with Frank on request-path integration |
-| Nathan | Shared benchmark, four-model comparison, selection rationale and report integration | Each member supplies their own reproducible model; jwatson8 reviews metrics |
-| Frank | HTTP recommendation service, Kafka success checks and personalization accounting | Alvajoy reviews deployment behavior |
-| Alvajoy | VM access, containers, Compose, deployment/runbook and architecture | Frank reproduces deployment |
+| jwatson8 | Developer and GitHub project/task maintainer; proposed live cold-start implementation | Pair with Frank on request-path integration |
+| Nathan (@cheepsahoy) | Project/team lead; coordinates review/submission and mentor scheduling; proposed benchmark/report lead | Each member supplies their model; jwatson8 reviews metrics |
+| Frank (@franktsai127) | Project developer; proposed HTTP service and traffic verification | Alvajoy reviews deployment behavior |
+| Alvajoy (@AlvajoyAsante) | Project developer and meeting note taker; proposed infrastructure/deployment work | Frank reproduces deployment |
 
 These are a starting proposal, not assumptions about anyone's skills. Adjust based
 on availability and interests. Everyone presents their M0 model, learns the other
@@ -79,8 +79,9 @@ availability. A blocker should be posted immediately with its impact and the hel
 needed. For urgent problems, tag the owner and backup in Slack; agree any secondary
 contact method privately rather than publishing phone numbers.
 
-Proposed project manager/board maintainer and scheduler: **jwatson8**. Proposed
-kickoff note taker: **Nathan**; rotate notes afterward. The task owner updates the
+Confirmed project/team lead and scheduling coordinator: **Nathan (@cheepsahoy)**.
+Meeting note taker: **Alvajoy (@AlvajoyAsante)**. GitHub project/task maintainer:
+**jwatson8**. Frank (@franktsai127) is a project developer. The task owner updates the
 issue status and evidence when work changes. The manager checks deadlines and
 unassigned tasks daily; no work is considered agreed until its owner and deadline
 are in the issue and meeting notes.
@@ -126,8 +127,7 @@ Use a separate view for M1 due dates and a future-work view. Until the extra sta
 options are added, GitHub's default Todo/In Progress/Done is sufficient.
 
 Link the project to the team repository and add the issues. Both repository access
-and project access must be checked for teammates and staff. Draft role labels do
-not substitute for actual issue assignees once usernames are known.
+and project access must be checked for teammates and staff. Set any pending actual issue assignees after repository invitations are accepted.
 
 M2 and M3 tasks are planning placeholders only: M2 adds automated tests/model-update
 automation; M3 adds regular updates/model-version switching. Obtain their full
