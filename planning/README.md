@@ -10,8 +10,7 @@
 
 Deadline: **Sunday October 11, 2026 at 11:59 PM Eastern**. Internal submission
 target: 11:00 PM Eastern. The dates and owners on individual tasks are proposals
-to confirm at kickoff. Nathan, Frank and Alvajoy need their actual GitHub usernames
-added as assignees and project collaborators. The prepared notes are not a claim
+to confirm at kickoff. GitHub accounts: Nathan @cheepsahoy, Frank @franktsai127, Alvajoy @AlvajoyAsante. Repository invitations have been sent where needed; assignments requiring invitation acceptance are noted on the issues. The prepared notes are not a claim
 that the meeting has happened.
 
 The benchmark describes jwatson8's unchanged M0 model only; it is not the team's
@@ -30,3 +29,12 @@ M2/M3 issues are future planning placeholders. Obtain the full milestone rubrics
 before scheduling implementation. M1 issue bodies include exact due dates and
 completion criteria; use the project board for status and the issues for the
 authoritative who/what/when record.
+
+## Confirmed team roles
+
+- Nathan (@cheepsahoy): project/team lead.
+- Alvajoy (@AlvajoyAsante): developer and meeting note taker.
+- Frank (@franktsai127): developer.
+- jwatson8: developer and GitHub project/task maintainer.
+
+Nathan owns team coordination, final review/submission and mentor scheduling; technical work areas and internal deadlines should still be confirmed at kickoff.
