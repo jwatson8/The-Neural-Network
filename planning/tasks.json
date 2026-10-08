@@ -15,7 +15,7 @@
       "acceptance": [
         "Verify all four members and mentor can access Slack and the team repository.",
         "Create/link the GitHub Project and add every M1 issue; add Assignee, Due date, Priority and Milestone fields.",
-        "Obtain Nathan, Frank and Alvajoy’s GitHub usernames and set actual assignees after confirming proposed ownership.",
+        "Confirm repository invitations are accepted for cheepsahoy, franktsai127 and AlvajoyAsante; then apply any pending actual issue assignments.",
         "Confirm Canvas deadline: October 11, 2026, 11:59 PM America/New_York."
       ],
       "rubric": "Team coordination, 10-point contract criterion",
@@ -32,7 +32,7 @@
         "M1-01"
       ],
       "acceptance": [
-        "Name the project manager, meeting scheduler, note taker and board maintainer.",
+        "Record confirmed roles: Nathan leads the team; Alvajoy takes meeting notes; jwatson8 maintains GitHub tasks; Frank is a developer. Confirm scheduling and work allocation at kickoff.",
         "Agree Slack response expectations, urgent contact, work allocation, reviews and escalation.",
         "Record actual attendees and decisions, with who does what by when; link each task issue.",
         "Treat proposed assignments as proposals until agreed; distribute work beyond existing strengths."
