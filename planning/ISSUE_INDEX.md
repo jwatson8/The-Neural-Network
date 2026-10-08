@@ -1,8 +1,8 @@
 # Team issue index
 
-Roles are confirmed. Technical work allocations and internal dates remain proposals for kickoff agreement. All times are Eastern.
+Roles are confirmed. Technical work allocations and internal dates remain proposals for kickoff agreement. All times are Eastern. Repository invitations must be accepted before pending actual assignments can be applied; see each issue for status.
 
-| Task | Owner / GitHub assignee | Due (Eastern) | Priority |
+| Task | Owner / intended GitHub assignee | Due (Eastern) | Priority |
 |---|---|---|---|
 | [[M1-01] Confirm access and establish the shared project board](https://github.com/jwatson8/The-Neural-Network/issues/1) | jwatson8 (@jwatson8) | 2026-10-09 12:00 | P0 |
 | [[M1-02] Agree team contract and record kickoff decisions](https://github.com/jwatson8/The-Neural-Network/issues/2) | Nathan (@cheepsahoy) | 2026-10-09 18:00 | P0 |
