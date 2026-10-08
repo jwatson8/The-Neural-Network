@@ -1,0 +1,173 @@
+{
+  "measured_at_utc": "2026-10-08T00:34:41.159687-07:00",
+  "base_commit": "b131afb5a05f0e86b6047508a2e9a29a1fbcf2e5",
+  "source_sha256": {
+    "recommender.py": "2b2922129329e08564618ae949654f9767453b34f5506b6ea1a7042b9aeb2774",
+    "benchmark_m1.py": "84dbaadb69263e9c9e11a510b3573003a9c44913c2592ec9b70a785e6a7d670d",
+    "llm_profiles.json": "4b56b1f297257feabe3c71d407e359902d96bdad02b47970235541ea5e7d2065"
+  },
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.14",
+    "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
+    "logical_cpus": 12,
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "sklearn": "1.6.1",
+    "threadpools_during_measurement": [
+      {
+        "user_api": "blas",
+        "internal_api": "openblas",
+        "num_threads": 1,
+        "prefix": "libscipy_openblas",
+        "version": "0.3.29",
+        "threading_layer": "pthreads",
+        "architecture": "Haswell"
+      },
+      {
+        "user_api": "openmp",
+        "internal_api": "openmp",
+        "num_threads": 1,
+        "prefix": "vcomp",
+        "version": null
+      },
+      {
+        "user_api": "blas",
+        "internal_api": "openblas",
+        "num_threads": 1,
+        "prefix": "libscipy_openblas",
+        "version": "0.3.28",
+        "threading_layer": "pthreads",
+        "architecture": "Haswell"
+      }
+    ]
+  },
+  "split": {
+    "method": "Last max(1, floor(0.2*n)) movie pairs per user, ordered by latest pair timestamp then movie ID; both watch and rating held out together.",
+    "train_events": 43906,
+    "test_events": 10748,
+    "train_pairs": 21953,
+    "test_pairs": 5374,
+    "train_fraction": 0.8033446774252571,
+    "ranking_users": 948,
+    "positive_test_movies": 3434,
+    "limitation": "Cross-user calendar-time leakage possible; exploratory per-user split. No validation set or hyperparameter search; not a global-time simulation."
+  },
+  "ranking": {
+    "10": {
+      "svd": {
+        "k": 10,
+        "users": 948,
+        "precision": 0.03175105485232067,
+        "recall": 0.08762306610407876,
+        "hit_rate": 0.24472573839662448,
+        "ndcg": 0.05930406659233303,
+        "catalog_coverage": 0.08369015181004281,
+        "distinct_recommended_movies": 215
+      },
+      "popularity": {
+        "k": 10,
+        "users": 948,
+        "precision": 0.018354430379746833,
+        "recall": 0.05617088607594937,
+        "hit_rate": 0.15611814345991562,
+        "ndcg": 0.038300828910563946,
+        "catalog_coverage": 0.00973141300116777,
+        "distinct_recommended_movies": 25
+      }
+    },
+    "20": {
+      "svd": {
+        "k": 20,
+        "users": 948,
+        "precision": 0.027426160337552744,
+        "recall": 0.14971870604781998,
+        "hit_rate": 0.370253164556962,
+        "ndcg": 0.08263514609684874,
+        "catalog_coverage": 0.11366290385363954,
+        "distinct_recommended_movies": 292
+      },
+      "popularity": {
+        "k": 20,
+        "users": 948,
+        "precision": 0.016350210970464137,
+        "recall": 0.10015822784810127,
+        "hit_rate": 0.22679324894514769,
+        "ndcg": 0.0538524488962324,
+        "catalog_coverage": 0.01479174776177501,
+        "distinct_recommended_movies": 38
+      }
+    }
+  },
+  "rating_diagnostics": {
+    "test_ratings": 5374,
+    "positive_fraction": 0.6390026051358392,
+    "conversion": "clip(5.5 + 4.5 * SVD score, 1, 10); no calibration fitted",
+    "svd": {
+      "rmse": 2.6021367146136862,
+      "mae": 2.2078983138059094,
+      "binary_accuracy_rating_at_least_7": 0.36378861183475997,
+      "predicted_positive_fraction": 0.0031633792333457386
+    },
+    "training_mean_baseline_value": 7.153555322734934,
+    "training_mean_baseline": {
+      "rmse": 2.056481957119898,
+      "mae": 1.6402190195174722,
+      "binary_accuracy_rating_at_least_7": 0.6390026051358392,
+      "predicted_positive_fraction": 1.0
+    }
+  },
+  "training": {
+    "runs": [
+      {
+        "load_validate_seconds": 0.21033520018681884,
+        "fit_seconds": 0.7144637000747025,
+        "serialize_seconds": 0.555063399951905,
+        "total_seconds": 1.4798623002134264
+      },
+      {
+        "load_validate_seconds": 0.20107949990779161,
+        "fit_seconds": 0.6019569002091885,
+        "serialize_seconds": 0.6085382997989655,
+        "total_seconds": 1.4115746999159455
+      },
+      {
+        "load_validate_seconds": 0.2071519000455737,
+        "fit_seconds": 0.5762069001793861,
+        "serialize_seconds": 0.567688399925828,
+        "total_seconds": 1.3510472001507878
+      }
+    ],
+    "median_total_seconds": 1.4115746999159455,
+    "median_fit_seconds": 0.6019569002091885,
+    "scope": "Full 54704-event dataset, including CSV load, validation, preparation, SVD and TF-IDF fitting, and uncompressed model serialization; excludes download and LLM profile generation; OS cache not cleared."
+  },
+  "inference": {
+    "warm": {
+      "requests": 1000,
+      "warmup_requests": 50,
+      "p50_ms": 3.55900009162724,
+      "p95_ms": 7.0761049864813685,
+      "p99_ms": 11.476391931064423,
+      "max_ms": 16.665900126099586,
+      "serial_calls_per_second": 233.72420589683597
+    },
+    "cold_cached_profile": {
+      "requests": 1000,
+      "warmup_requests": 50,
+      "p50_ms": 4.693149821832776,
+      "p95_ms": 7.279599900357424,
+      "p99_ms": 8.149713999591766,
+      "max_ms": 14.97930008918047,
+      "serial_calls_per_second": 197.1011428307828
+    },
+    "scope": "In-process recommend(k=20), single serial client, loaded model; excludes HTTP, network, metadata API, queueing, and LLM generation."
+  },
+  "size": {
+    "serving_artifact_bytes": 4612719,
+    "serving_artifact_mib": 4.399031639099121,
+    "profiles_bytes": 36446,
+    "svd_factor_bytes": 926464,
+    "scope": "Full uncompressed joblib serving bundle plus separately reported profiles. No RAM measurement; excludes Python packages, container, and optional local LLM weights."
+  }
+}
