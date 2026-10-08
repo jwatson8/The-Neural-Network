@@ -1,9 +1,9 @@
 {
   "repository": "jwatson8/The-Neural-Network",
-  "project_title": "The Neural Network \u2014 ML in Production",
+  "project_title": "The Neural Network — ML in Production",
   "timezone": "America/New_York",
-  "submission_deadline": "2026-10-11T23:59:00-04:00",
-  "assignment_status": "Proposed until agreed at kickoff. GitHub usernames needed for Nathan, Frank and Alvajoy.",
+  "submission_deadline": "2026-10-11T20:59:00-07:00",
+  "assignment_status": "Team roles confirmed by jwatson8. Technical work areas and internal dates remain proposals for kickoff agreement.",
   "tasks": [
     {
       "key": "M1-01",
@@ -15,16 +15,17 @@
       "acceptance": [
         "Verify all four members and mentor can access Slack and the team repository.",
         "Create/link the GitHub Project and add every M1 issue; add Assignee, Due date, Priority and Milestone fields.",
-        "Obtain Nathan, Frank and Alvajoy\u2019s GitHub usernames and set actual assignees after confirming proposed ownership.",
+        "Obtain Nathan, Frank and Alvajoy’s GitHub usernames and set actual assignees after confirming proposed ownership.",
         "Confirm Canvas deadline: October 11, 2026, 11:59 PM America/New_York."
       ],
       "rubric": "Team coordination, 10-point contract criterion",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "jwatson8"
     },
     {
       "key": "M1-02",
       "title": "[M1-02] Agree team contract and record kickoff decisions",
-      "owner": "jwatson8",
+      "owner": "Nathan",
       "due": "2026-10-09 18:00",
       "priority": "P0",
       "depends_on": [
@@ -37,11 +38,12 @@
         "Treat proposed assignments as proposals until agreed; distribute work beyond existing strengths."
       ],
       "rubric": "Team contract and meeting notes: 10 points",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "cheepsahoy"
     },
     {
       "key": "M1-03",
-      "title": "[M1-03] Present and package jwatson8\u2019s Milestone 0 model",
+      "title": "[M1-03] Present and package jwatson8’s Milestone 0 model",
       "owner": "jwatson8",
       "due": "2026-10-09 18:00",
       "priority": "P0",
@@ -52,56 +54,60 @@
         "Share meeting/MODEL_BRIEF.md and benchmark_m1.py; flag that current quality is exploratory and live cold start needs work.",
         "Provide reproducible commands and participate in the common benchmark."
       ],
-      "rubric": "All members\u2019 models must be compared",
-      "milestone": "M1"
+      "rubric": "All members’ models must be compared",
+      "milestone": "M1",
+      "assignee": "jwatson8"
     },
     {
       "key": "M1-04",
-      "title": "[M1-04] Present and package Nathan\u2019s Milestone 0 model",
+      "title": "[M1-04] Present and package Nathan’s Milestone 0 model",
       "owner": "Nathan",
       "due": "2026-10-09 18:00",
       "priority": "P0",
       "depends_on": [],
       "acceptance": [
-        "Link Nathan\u2019s M0 repository and exact commit.",
+        "Link Nathan’s M0 repository and exact commit.",
         "Document install, training, inference, cold-start approach and required artifacts.",
         "Demonstrate recommendations and provide an adapter for the common evaluation protocol.",
         "Report any external API/runtime requirements and unsupported user cases."
       ],
-      "rubric": "All members\u2019 models must be compared",
-      "milestone": "M1"
+      "rubric": "All members’ models must be compared",
+      "milestone": "M1",
+      "assignee": "cheepsahoy"
     },
     {
       "key": "M1-05",
-      "title": "[M1-05] Present and package Frank\u2019s Milestone 0 model",
+      "title": "[M1-05] Present and package Frank’s Milestone 0 model",
       "owner": "Frank",
       "due": "2026-10-09 18:00",
       "priority": "P0",
       "depends_on": [],
       "acceptance": [
-        "Link Frank\u2019s M0 repository and exact commit.",
+        "Link Frank’s M0 repository and exact commit.",
         "Document install, training, inference, cold-start approach and required artifacts.",
         "Demonstrate recommendations and provide an adapter for the common evaluation protocol.",
         "Report any external API/runtime requirements and unsupported user cases."
       ],
-      "rubric": "All members\u2019 models must be compared",
-      "milestone": "M1"
+      "rubric": "All members’ models must be compared",
+      "milestone": "M1",
+      "assignee": "franktsai127"
     },
     {
       "key": "M1-06",
-      "title": "[M1-06] Present and package Alvajoy\u2019s Milestone 0 model",
+      "title": "[M1-06] Present and package Alvajoy’s Milestone 0 model",
       "owner": "Alvajoy",
       "due": "2026-10-09 18:00",
       "priority": "P0",
       "depends_on": [],
       "acceptance": [
-        "Link Alvajoy\u2019s M0 repository and exact commit.",
+        "Link Alvajoy’s M0 repository and exact commit.",
         "Document install, training, inference, cold-start approach and required artifacts.",
         "Demonstrate recommendations and provide an adapter for the common evaluation protocol.",
         "Report any external API/runtime requirements and unsupported user cases."
       ],
-      "rubric": "All members\u2019 models must be compared",
-      "milestone": "M1"
+      "rubric": "All members’ models must be compared",
+      "milestone": "M1",
+      "assignee": "AlvajoyAsante"
     },
     {
       "key": "M1-07",
@@ -122,7 +128,8 @@
         "Agree per-user split limitation or a better shared split; do not compare incompatible M0 scores."
       ],
       "rubric": "Four qualities: up to 20 points",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "cheepsahoy"
     },
     {
       "key": "M1-08",
@@ -140,7 +147,8 @@
         "Do not mark missing results as zero; record and resolve failures."
       ],
       "rubric": "Four qualities: up to 20 points",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "cheepsahoy"
     },
     {
       "key": "M1-09",
@@ -158,7 +166,8 @@
         "Update responsibilities if the chosen model changes the service or cold-start plan."
       ],
       "rubric": "Model comparison decision and report",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "cheepsahoy"
     },
     {
       "key": "M1-10",
@@ -176,7 +185,8 @@
         "Verify known, new and invalid-user behavior and record end-to-end latency; course timeout is 600 ms."
       ],
       "rubric": "Prediction service: 10 points; traffic criteria",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "franktsai127"
     },
     {
       "key": "M1-11",
@@ -189,14 +199,15 @@
         "M1-12"
       ],
       "acceptance": [
-        "Consume account_created events and fetch the user\u2019s likes/dislikes from the live API.",
+        "Consume account_created events and fetch the user’s likes/dislikes from the live API.",
         "Generate LLM interpretations automatically in a background worker and persist versioned profiles.",
         "Allow inference for IDs absent from the offline fitted users list; a new profile must not require full retraining.",
         "Use a fast pending-profile fallback, retries and deduplication; demonstrate a new user receiving personalized recommendations after profile completion.",
         "Measure time to profile readiness and LLM resource/API cost separately; static profiles for the original 50 users alone are insufficient."
       ],
       "rubric": "Cold-start integration: 10-point service criterion",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "jwatson8"
     },
     {
       "key": "M1-12",
@@ -214,7 +225,8 @@
         "Resolve infrastructure blockers with course staff early."
       ],
       "rubric": "Prerequisite for live service and deployment",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "AlvajoyAsante"
     },
     {
       "key": "M1-13",
@@ -232,7 +244,8 @@
         "Demonstrate docker compose up -d --build from documented prerequisites; ensure a restart preserves profiles."
       ],
       "rubric": "Containerization/deployment: 10 points",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "AlvajoyAsante"
     },
     {
       "key": "M1-14",
@@ -252,7 +265,8 @@
         "Aim for Saturday deployment to leave a full day for course traffic and fixes; keep rollback instructions."
       ],
       "rubric": "Containers running in production: 10 points",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "AlvajoyAsante"
     },
     {
       "key": "M1-15",
@@ -270,7 +284,8 @@
         "Investigate parsing, network or timeout failures while there is time to fix them."
       ],
       "rubric": "Successful requests: 10 points",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "franktsai127"
     },
     {
       "key": "M1-16",
@@ -289,7 +304,8 @@
         "Keep monitoring through the chosen before/after-submission window; do not stop after 2,000 successes."
       ],
       "rubric": "Traffic success: 10 points; personalization: 10 points",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "franktsai127"
     },
     {
       "key": "M1-17",
@@ -310,7 +326,8 @@
         "State limitations honestly and use observed results only."
       ],
       "rubric": "Model comparison and prediction-service grading",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "cheepsahoy"
     },
     {
       "key": "M1-18",
@@ -328,12 +345,13 @@
         "State deployment and persistence behavior; do not depict components that were not implemented."
       ],
       "rubric": "Containerization/deployment: 10 points",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "AlvajoyAsante"
     },
     {
       "key": "M1-19",
       "title": "[M1-19] Review all rubric evidence and cross-teach the solution",
-      "owner": "jwatson8",
+      "owner": "Nathan",
       "due": "2026-10-11 21:00",
       "priority": "P0",
       "depends_on": [
@@ -349,12 +367,13 @@
         "Check course staff repository access and confirm each task has an actual assignee and due date."
       ],
       "rubric": "Rubric audit; mentor understanding",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "cheepsahoy"
     },
     {
       "key": "M1-20",
       "title": "[M1-20] Submit the final commit URL to Canvas",
-      "owner": "jwatson8",
+      "owner": "Nathan",
       "due": "2026-10-11 23:00",
       "priority": "P0",
       "depends_on": [
@@ -367,12 +386,13 @@
         "Tell team the selected traffic observation window and keep the service running."
       ],
       "rubric": "Submission; internal target provides a 59-minute buffer",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "cheepsahoy"
     },
     {
       "key": "M1-21",
       "title": "[M1-21] Schedule and attend the mentor debrief",
-      "owner": "jwatson8",
+      "owner": "Nathan",
       "due": "2026-10-11 22:00",
       "priority": "P1",
       "depends_on": [
@@ -385,11 +405,12 @@
         "Record the agreed meeting time; do not close attendance work until the meeting is completed."
       ],
       "rubric": "10 points individually",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "cheepsahoy"
     },
     {
       "key": "M1-22",
-      "title": "[M1-22] Complete jwatson8\u2019s individual teamwork survey",
+      "title": "[M1-22] Complete jwatson8’s individual teamwork survey",
       "owner": "jwatson8",
       "due": "2026-10-11 23:00",
       "priority": "P0",
@@ -400,11 +421,12 @@
         "This is a conservative internal target; use the official survey deadline if different."
       ],
       "rubric": "3 points individually",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "jwatson8"
     },
     {
       "key": "M1-23",
-      "title": "[M1-23] Complete Nathan\u2019s individual teamwork survey",
+      "title": "[M1-23] Complete Nathan’s individual teamwork survey",
       "owner": "Nathan",
       "due": "2026-10-11 23:00",
       "priority": "P0",
@@ -415,11 +437,12 @@
         "This is a conservative internal target; use the official survey deadline if different."
       ],
       "rubric": "3 points individually",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "cheepsahoy"
     },
     {
       "key": "M1-24",
-      "title": "[M1-24] Complete Frank\u2019s individual teamwork survey",
+      "title": "[M1-24] Complete Frank’s individual teamwork survey",
       "owner": "Frank",
       "due": "2026-10-11 23:00",
       "priority": "P0",
@@ -430,11 +453,12 @@
         "This is a conservative internal target; use the official survey deadline if different."
       ],
       "rubric": "3 points individually",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "franktsai127"
     },
     {
       "key": "M1-25",
-      "title": "[M1-25] Complete Alvajoy\u2019s individual teamwork survey",
+      "title": "[M1-25] Complete Alvajoy’s individual teamwork survey",
       "owner": "Alvajoy",
       "due": "2026-10-11 23:00",
       "priority": "P0",
@@ -445,7 +469,8 @@
         "This is a conservative internal target; use the official survey deadline if different."
       ],
       "rubric": "3 points individually",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "AlvajoyAsante"
     },
     {
       "key": "M1-26",
@@ -463,12 +488,13 @@
         "Do not let bonus work delay required deployment or submission."
       ],
       "rubric": "Optional social +3; learning beyond comfort zone up to +3",
-      "milestone": "M1"
+      "milestone": "M1",
+      "assignee": "jwatson8"
     },
     {
       "key": "M2-01",
       "title": "[M2 planning] Automated tests and model-update automation",
-      "owner": "Team \u2014 decide after M1",
+      "owner": "Team — decide after M1",
       "due": null,
       "priority": "P2",
       "depends_on": [
@@ -485,7 +511,7 @@
     {
       "key": "M3-01",
       "title": "[M3 planning] Regular updates and model-version switching",
-      "owner": "Team \u2014 decide after M2",
+      "owner": "Team — decide after M2",
       "due": null,
       "priority": "P2",
       "depends_on": [],
@@ -496,6 +522,28 @@
       ],
       "rubric": "Future scope only; full assignment not yet supplied",
       "milestone": "M3"
+    }
+  ],
+  "team": [
+    {
+      "role": "Developer and GitHub project/task maintainer",
+      "username": "jwatson8",
+      "name": "jwatson8"
+    },
+    {
+      "role": "Project/team lead",
+      "username": "cheepsahoy",
+      "name": "Nathan"
+    },
+    {
+      "role": "Project developer",
+      "username": "franktsai127",
+      "name": "Frank"
+    },
+    {
+      "role": "Project developer and meeting note taker",
+      "username": "AlvajoyAsante",
+      "name": "Alvajoy"
     }
   ]
 }
