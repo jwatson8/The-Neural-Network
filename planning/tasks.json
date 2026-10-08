@@ -1,0 +1,501 @@
+{
+  "repository": "jwatson8/The-Neural-Network",
+  "project_title": "The Neural Network \u2014 ML in Production",
+  "timezone": "America/New_York",
+  "submission_deadline": "2026-10-11T23:59:00-04:00",
+  "assignment_status": "Proposed until agreed at kickoff. GitHub usernames needed for Nathan, Frank and Alvajoy.",
+  "tasks": [
+    {
+      "key": "M1-01",
+      "title": "[M1-01] Confirm access and establish the shared project board",
+      "owner": "jwatson8",
+      "due": "2026-10-09 12:00",
+      "priority": "P0",
+      "depends_on": [],
+      "acceptance": [
+        "Verify all four members and mentor can access Slack and the team repository.",
+        "Create/link the GitHub Project and add every M1 issue; add Assignee, Due date, Priority and Milestone fields.",
+        "Obtain Nathan, Frank and Alvajoy\u2019s GitHub usernames and set actual assignees after confirming proposed ownership.",
+        "Confirm Canvas deadline: October 11, 2026, 11:59 PM America/New_York."
+      ],
+      "rubric": "Team coordination, 10-point contract criterion",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-02",
+      "title": "[M1-02] Agree team contract and record kickoff decisions",
+      "owner": "jwatson8",
+      "due": "2026-10-09 18:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-01"
+      ],
+      "acceptance": [
+        "Name the project manager, meeting scheduler, note taker and board maintainer.",
+        "Agree Slack response expectations, urgent contact, work allocation, reviews and escalation.",
+        "Record actual attendees and decisions, with who does what by when; link each task issue.",
+        "Treat proposed assignments as proposals until agreed; distribute work beyond existing strengths."
+      ],
+      "rubric": "Team contract and meeting notes: 10 points",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-03",
+      "title": "[M1-03] Present and package jwatson8\u2019s Milestone 0 model",
+      "owner": "jwatson8",
+      "due": "2026-10-09 18:00",
+      "priority": "P0",
+      "depends_on": [],
+      "acceptance": [
+        "Link the M0 repository and exact commit.",
+        "Walk teammates through training, inference, LLM cold start and limitations.",
+        "Share meeting/MODEL_BRIEF.md and benchmark_m1.py; flag that current quality is exploratory and live cold start needs work.",
+        "Provide reproducible commands and participate in the common benchmark."
+      ],
+      "rubric": "All members\u2019 models must be compared",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-04",
+      "title": "[M1-04] Present and package Nathan\u2019s Milestone 0 model",
+      "owner": "Nathan",
+      "due": "2026-10-09 18:00",
+      "priority": "P0",
+      "depends_on": [],
+      "acceptance": [
+        "Link Nathan\u2019s M0 repository and exact commit.",
+        "Document install, training, inference, cold-start approach and required artifacts.",
+        "Demonstrate recommendations and provide an adapter for the common evaluation protocol.",
+        "Report any external API/runtime requirements and unsupported user cases."
+      ],
+      "rubric": "All members\u2019 models must be compared",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-05",
+      "title": "[M1-05] Present and package Frank\u2019s Milestone 0 model",
+      "owner": "Frank",
+      "due": "2026-10-09 18:00",
+      "priority": "P0",
+      "depends_on": [],
+      "acceptance": [
+        "Link Frank\u2019s M0 repository and exact commit.",
+        "Document install, training, inference, cold-start approach and required artifacts.",
+        "Demonstrate recommendations and provide an adapter for the common evaluation protocol.",
+        "Report any external API/runtime requirements and unsupported user cases."
+      ],
+      "rubric": "All members\u2019 models must be compared",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-06",
+      "title": "[M1-06] Present and package Alvajoy\u2019s Milestone 0 model",
+      "owner": "Alvajoy",
+      "due": "2026-10-09 18:00",
+      "priority": "P0",
+      "depends_on": [],
+      "acceptance": [
+        "Link Alvajoy\u2019s M0 repository and exact commit.",
+        "Document install, training, inference, cold-start approach and required artifacts.",
+        "Demonstrate recommendations and provide an adapter for the common evaluation protocol.",
+        "Report any external API/runtime requirements and unsupported user cases."
+      ],
+      "rubric": "All members\u2019 models must be compared",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-07",
+      "title": "[M1-07] Freeze the four measurement definitions and shared benchmark inputs",
+      "owner": "Nathan",
+      "due": "2026-10-09 20:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-03",
+        "M1-04",
+        "M1-05",
+        "M1-06"
+      ],
+      "acceptance": [
+        "For prediction quality, training cost, inference cost, and disk or memory size, write metric / data / operationalization.",
+        "Agree exact dataset hashes, held-out pairs, relevance threshold, candidate catalog, K=20, seen-item rules and eligible users.",
+        "Use identical hardware and documented thread settings; separate warm/cold inference and disclose excluded costs.",
+        "Agree per-user split limitation or a better shared split; do not compare incompatible M0 scores."
+      ],
+      "rubric": "Four qualities: up to 20 points",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-08",
+      "title": "[M1-08] Run all four models and produce the comparison table",
+      "owner": "Nathan",
+      "due": "2026-10-10 10:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-07"
+      ],
+      "acceptance": [
+        "Each member runs their model under the agreed protocol; Nathan consolidates results.",
+        "Populate all four required qualities for all four models with units and source commit links.",
+        "Save measurement code, raw outputs, repeat counts and environment details.",
+        "Do not mark missing results as zero; record and resolve failures."
+      ],
+      "rubric": "Four qualities: up to 20 points",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-09",
+      "title": "[M1-09] Choose the production model and record the trade-offs",
+      "owner": "Nathan",
+      "due": "2026-10-10 11:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-08"
+      ],
+      "acceptance": [
+        "Review quality, speed, training cost and size jointly with all members.",
+        "Record selected model and reason; discuss at least one rejected alternative.",
+        "Identify any adaptations and freeze a model artifact/version for deployment.",
+        "Update responsibilities if the chosen model changes the service or cold-start plan."
+      ],
+      "rubric": "Model comparison decision and report",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-10",
+      "title": "[M1-10] Implement the exact recommendation HTTP contract",
+      "owner": "Frank",
+      "due": "2026-10-10 14:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-09"
+      ],
+      "acceptance": [
+        "Implement GET /recommend/<userid> exposed on VM port 8082.",
+        "Return one line of up to 20 valid unique movie IDs, comma-separated and ordered best first; no JSON, titles or scores.",
+        "Load model at startup, avoid retraining or LLM generation inside the request, and handle missing users promptly.",
+        "Verify known, new and invalid-user behavior and record end-to-end latency; course timeout is 600 ms."
+      ],
+      "rubric": "Prediction service: 10 points; traffic criteria",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-11",
+      "title": "[M1-11] Automate cold start for new live users",
+      "owner": "jwatson8",
+      "due": "2026-10-10 14:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-09",
+        "M1-12"
+      ],
+      "acceptance": [
+        "Consume account_created events and fetch the user\u2019s likes/dislikes from the live API.",
+        "Generate LLM interpretations automatically in a background worker and persist versioned profiles.",
+        "Allow inference for IDs absent from the offline fitted users list; a new profile must not require full retraining.",
+        "Use a fast pending-profile fallback, retries and deduplication; demonstrate a new user receiving personalized recommendations after profile completion.",
+        "Measure time to profile readiness and LLM resource/API cost separately; static profiles for the original 50 users alone are insufficient."
+      ],
+      "rubric": "Cold-start integration: 10-point service criterion",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-12",
+      "title": "[M1-12] Verify VM, Kafka and metadata API access",
+      "owner": "Alvajoy",
+      "due": "2026-10-09 20:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-01"
+      ],
+      "acceptance": [
+        "Confirm all teammates can SSH to the assigned VM and locate course-provided Kafka/API settings.",
+        "Verify disk, memory, Docker/Compose availability and VM reachability on the required service port.",
+        "Keep credentials out of Git; record reproducible environment setup and .env.example variable names only.",
+        "Resolve infrastructure blockers with course staff early."
+      ],
+      "rubric": "Prerequisite for live service and deployment",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-13",
+      "title": "[M1-13] Containerize service and cold-start worker with Docker Compose",
+      "owner": "Alvajoy",
+      "due": "2026-10-10 13:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-12"
+      ],
+      "acceptance": [
+        "Commit Dockerfile(s), compose.yaml, dependency versions and startup commands.",
+        "Serve on 0.0.0.0 inside the container with host port 8082 exposed; load a versioned model at startup.",
+        "Integrate cold-start worker and durable profile storage in Compose, with environment-based configuration.",
+        "Demonstrate docker compose up -d --build from documented prerequisites; ensure a restart preserves profiles."
+      ],
+      "rubric": "Containerization/deployment: 10 points",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-14",
+      "title": "[M1-14] Deploy to the team VM and verify reproduction",
+      "owner": "Alvajoy",
+      "due": "2026-10-10 16:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-10",
+        "M1-11",
+        "M1-13"
+      ],
+      "acceptance": [
+        "Deploy a specific committed version over SSH using repository-owned commands.",
+        "Record deployed commit/model version and smoke-test the external VM URL.",
+        "Have a second teammate reproduce startup using the runbook; put lasting fixes in Git.",
+        "Aim for Saturday deployment to leave a full day for course traffic and fixes; keep rollback instructions."
+      ],
+      "rubric": "Containers running in production: 10 points",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-15",
+      "title": "[M1-15] Verify real course requests and Kafka success records",
+      "owner": "Frank",
+      "due": "2026-10-10 17:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-14"
+      ],
+      "acceptance": [
+        "Locate recommendation-request records for this team's server in movielog.",
+        "Verify status 200, parsed ordered movie IDs and response time <=600 ms.",
+        "Record the exact timestamp window and evidence location; distinguish course traffic from self-generated tests.",
+        "Investigate parsing, network or timeout failures while there is time to fix them."
+      ],
+      "rubric": "Successful requests: 10 points",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-16",
+      "title": "[M1-16] Track the 24-hour success and personalization targets",
+      "owner": "Frank",
+      "due": "2026-10-11 20:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-15"
+      ],
+      "acceptance": [
+        "Compute successful requests and total requests over the applicable 24-hour grading window.",
+        "Demonstrate >=2,000 successful course requests and personalized successful requests / ALL requests >=10%.",
+        "Use route-level service logs plus course responses to identify real personalization; different lists alone do not prove personalization.",
+        "Check live-user coverage; offline 1,000-user training coverage may be too small. Track unknown-user and pending-profile rates.",
+        "Keep monitoring through the chosen before/after-submission window; do not stop after 2,000 successes."
+      ],
+      "rubric": "Traffic success: 10 points; personalization: 10 points",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-17",
+      "title": "[M1-17] Write model comparison and prediction-service report sections",
+      "owner": "Nathan",
+      "due": "2026-10-11 19:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-08",
+        "M1-09",
+        "M1-10",
+        "M1-11"
+      ],
+      "acceptance": [
+        "Create m1_report.md at the team repository root.",
+        "Comparison: <=1 page of text plus table, four three-step metrics, all four model results and M0 links, selection argument, measurement code links.",
+        "Service: <=1 page explaining ranking, changes to selected model, and how/when live cold start runs; link training and inference implementation.",
+        "State limitations honestly and use observed results only."
+      ],
+      "rubric": "Model comparison and prediction-service grading",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-18",
+      "title": "[M1-18] Document deployment architecture and runbook",
+      "owner": "Alvajoy",
+      "due": "2026-10-11 18:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-14"
+      ],
+      "acceptance": [
+        "Write <=0.5-page containerization/deployment section with links to Dockerfiles, Compose and runbook.",
+        "Include one compact architecture view with a named question, separating request logic, model component and cold-start path.",
+        "Explain a concrete trade-off: e.g. background profile generation protects latency but new users wait for personalization.",
+        "State deployment and persistence behavior; do not depict components that were not implemented."
+      ],
+      "rubric": "Containerization/deployment: 10 points",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-19",
+      "title": "[M1-19] Review all rubric evidence and cross-teach the solution",
+      "owner": "jwatson8",
+      "due": "2026-10-11 21:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-02",
+        "M1-16",
+        "M1-17",
+        "M1-18"
+      ],
+      "acceptance": [
+        "Every teammate explains the model, API, live cold start, deployment and alternatives.",
+        "Check all report links, four-model table, who/what/due-date notes, board and issue links.",
+        "Verify report descriptions match running code and all required evidence exists.",
+        "Check course staff repository access and confirm each task has an actual assignee and due date."
+      ],
+      "rubric": "Rubric audit; mentor understanding",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-20",
+      "title": "[M1-20] Submit the final commit URL to Canvas",
+      "owner": "jwatson8",
+      "due": "2026-10-11 23:00",
+      "priority": "P0",
+      "depends_on": [
+        "M1-19"
+      ],
+      "acceptance": [
+        "Push final code and root m1_report.md; verify staff access.",
+        "Submit the exact latest commit URL to Canvas, not the repository homepage.",
+        "Record submission time and commit; course deadline is October 11 at 23:59 Eastern.",
+        "Tell team the selected traffic observation window and keep the service running."
+      ],
+      "rubric": "Submission; internal target provides a 59-minute buffer",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-21",
+      "title": "[M1-21] Schedule and attend the mentor debrief",
+      "owner": "jwatson8",
+      "due": "2026-10-11 22:00",
+      "priority": "P1",
+      "depends_on": [
+        "M1-02"
+      ],
+      "acceptance": [
+        "Contact the mentor and schedule the debrief no later than one week after actual submission.",
+        "For an October 11 submission, target a meeting by October 18; confirm all four members can attend.",
+        "Prepare model/deployment alternatives, teamwork reflection and evidence of shared understanding.",
+        "Record the agreed meeting time; do not close attendance work until the meeting is completed."
+      ],
+      "rubric": "10 points individually",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-22",
+      "title": "[M1-22] Complete jwatson8\u2019s individual teamwork survey",
+      "owner": "jwatson8",
+      "due": "2026-10-11 23:00",
+      "priority": "P0",
+      "depends_on": [],
+      "acceptance": [
+        "Find the milestone teamwork survey in Canvas and confirm its actual due date.",
+        "Complete your own survey; record completion without copying private peer feedback into GitHub.",
+        "This is a conservative internal target; use the official survey deadline if different."
+      ],
+      "rubric": "3 points individually",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-23",
+      "title": "[M1-23] Complete Nathan\u2019s individual teamwork survey",
+      "owner": "Nathan",
+      "due": "2026-10-11 23:00",
+      "priority": "P0",
+      "depends_on": [],
+      "acceptance": [
+        "Find the milestone teamwork survey and confirm its actual due date.",
+        "Nathan completes their own survey; record completion without private peer feedback.",
+        "This is a conservative internal target; use the official survey deadline if different."
+      ],
+      "rubric": "3 points individually",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-24",
+      "title": "[M1-24] Complete Frank\u2019s individual teamwork survey",
+      "owner": "Frank",
+      "due": "2026-10-11 23:00",
+      "priority": "P0",
+      "depends_on": [],
+      "acceptance": [
+        "Find the milestone teamwork survey and confirm its actual due date.",
+        "Frank completes their own survey; record completion without private peer feedback.",
+        "This is a conservative internal target; use the official survey deadline if different."
+      ],
+      "rubric": "3 points individually",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-25",
+      "title": "[M1-25] Complete Alvajoy\u2019s individual teamwork survey",
+      "owner": "Alvajoy",
+      "due": "2026-10-11 23:00",
+      "priority": "P0",
+      "depends_on": [],
+      "acceptance": [
+        "Find the milestone teamwork survey and confirm its actual due date.",
+        "Alvajoy completes their own survey; record completion without private peer feedback.",
+        "This is a conservative internal target; use the official survey deadline if different."
+      ],
+      "rubric": "3 points individually",
+      "milestone": "M1"
+    },
+    {
+      "key": "M1-26",
+      "title": "[M1-26] Optional: plan social activity and document learning beyond comfort zones",
+      "owner": "jwatson8",
+      "due": "2026-10-11 18:00",
+      "priority": "P2",
+      "depends_on": [
+        "M1-02"
+      ],
+      "acceptance": [
+        "Choose an optional non-course social activity; participants can post a non-sensitive note in #social and tag participating teammates.",
+        "Course accepts social evidence until three days after submission; for October 11 submission, October 14.",
+        "Record agreed pairings and new skills learned for the mentor; all members should understand other components.",
+        "Do not let bonus work delay required deployment or submission."
+      ],
+      "rubric": "Optional social +3; learning beyond comfort zone up to +3",
+      "milestone": "M1"
+    },
+    {
+      "key": "M2-01",
+      "title": "[M2 planning] Automated tests and model-update automation",
+      "owner": "Team \u2014 decide after M1",
+      "due": null,
+      "priority": "P2",
+      "depends_on": [
+        "M1-20"
+      ],
+      "acceptance": [
+        "Obtain the full M2 rubric and deadline before assigning implementation tasks.",
+        "Plan automated tests and model-update automation on the same repository and Compose deployment.",
+        "Preserve reproducible training, artifact versions and deployment configuration from M1."
+      ],
+      "rubric": "Future scope only; full assignment not yet supplied",
+      "milestone": "M2"
+    },
+    {
+      "key": "M3-01",
+      "title": "[M3 planning] Regular updates and model-version switching",
+      "owner": "Team \u2014 decide after M2",
+      "due": null,
+      "priority": "P2",
+      "depends_on": [],
+      "acceptance": [
+        "Obtain the full M3 rubric and deadline before assigning implementation tasks.",
+        "Plan regular updates, version switching and operational monitoring on the existing deployment.",
+        "Consider rollback, drift, feedback effects and resource growth; do not invent later rubric requirements."
+      ],
+      "rubric": "Future scope only; full assignment not yet supplied",
+      "milestone": "M3"
+    }
+  ]
+}
