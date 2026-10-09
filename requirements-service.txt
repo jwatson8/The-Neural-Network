@@ -1,0 +1,4 @@
+-r requirements.txt
+Flask==3.1.1
+openai==2.11.0
+gunicorn==23.0.0
