@@ -9,8 +9,8 @@ from pathlib import Path
 import joblib
 from flask import Flask, Response, jsonify
 
-from service.model_adapter import recommend, validate_model
-from service.store import ProfileStore
+from src.service.model_adapter import recommend, validate_model
+from src.service.store import ProfileStore
 
 logger = logging.getLogger(__name__)
 
