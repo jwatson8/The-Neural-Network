@@ -14,4 +14,8 @@
 
 Testing data for inferences is combed to ensure that only movies that were in every models training data is included in the test data (no "cold" items).
 
-4) All mdoels are 
+## Testings
+Testing data is found under `results`. Main problem is the testing approach could not be standardized accross the 4 models and initial suite under-valued Frank and Jace.
+Tests fall into two categories: model accuracy and model performance.
+1) Model performance: tests are in: `throughput.py` and `train_ally.py`. Model tests save to `results/training_times.md`. These include times to train, and the throughput of each model.
+2) Model accuracy: models are tested with `inference_tests.py`. All models are tested off a baseline "just reccomend popular movies" based on average movie rating. Initial confusion matrix included recall, precision, fp, and fn. We then added RMSE and MAE. These were not great measurements of quality because Frank and Jace were not designed to predict ratings, and so their model poorly converted when scaled (difficult to determine approach model scale). New graphs are native hit rate @ 20, ndcg@20, precision@20, recall@20.
