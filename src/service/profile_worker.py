@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from openai import OpenAI
 from pydantic import BaseModel
 
-from service.store import ProfileStore
+from src.service.store import ProfileStore
 
 logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'))
 logger = logging.getLogger(__name__)

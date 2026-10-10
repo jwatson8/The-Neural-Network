@@ -5,9 +5,9 @@ from pathlib import Path
 
 import numpy as np
 
-from service.api import create_app
-from service.model_adapter import recommend
-from service.store import ProfileStore
+from src.service.api import create_app
+from src.service.model_adapter import recommend
+from src.service.store import ProfileStore
 
 
 class DenseResult:
