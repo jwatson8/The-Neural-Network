@@ -1,8 +1,8 @@
+## Problems between folders
+.DS_Store
 .env
-.env.*
-!.env.example
 .venv/
+.vscode/
 __pycache__/
 *.py[cod]
-artifacts/
-state/
+models/
