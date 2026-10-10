@@ -1,0 +1,8 @@
+## Problems between folders
+.DS_Store
+.env
+.venv/
+.vscode/
+__pycache__/
+*.py[cod]
+models/
