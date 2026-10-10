@@ -1,0 +1,37 @@
+name: neural-network-smoke
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8082:8082"
+    environment:
+      MODEL_PATH: /inputs/model.joblib
+      MODEL_VERSION: m0-svd-smoke
+      PROFILE_DB_PATH: /state/profiles.sqlite3
+      PROFILE_SEED_PATH: /inputs/llm_profiles.json
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    volumes:
+      - type: bind
+        source: ./artifacts
+        target: /inputs
+        read_only: true
+        bind:
+          create_host_path: false
+      - smoke-profiles:/state
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  smoke-profiles:
