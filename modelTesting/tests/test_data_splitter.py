@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from utils.dataProvider import DATA_PATH, loadPreparedData
+from utils.dataProvider import DATA_PATH, loadFullData, loadPreparedData
 from utils.dataSplitter import pairFingerprint, splitDataForML
 
 
@@ -86,6 +86,16 @@ class DataSplitterTests(unittest.TestCase):
         self.assertEqual(5561, data.split_metadata["test_pair_count"])
         self.assertEqual(43582, data.split_metadata["train_event_count"])
         self.assertEqual(11122, data.split_metadata["test_event_count"])
+
+    def test_full_data_uses_every_event(self):
+        if not Path(DATA_PATH / "events.csv.gz").is_file():
+            self.skipTest("supplied data is unavailable")
+        data = loadFullData(DATA_PATH)
+        self.assertEqual("full_event_history", data.split_metadata["strategy"])
+        self.assertEqual(27327, data.split_metadata["train_pair_count"])
+        self.assertEqual(54704, data.split_metadata["train_event_count"])
+        self.assertEqual(0, data.split_metadata["test_event_count"])
+        self.assertTrue(data.test_events.empty)
 
 
 if __name__ == "__main__":

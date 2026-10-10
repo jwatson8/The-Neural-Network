@@ -81,14 +81,17 @@ def train_model(data: PreparedModelData, model_path=DEFAULT_MODEL_PATH):
     algo = SVD()
     algo.fit(trainset)
 
-    testset = list(
-        test_ratings[["user_id", "movie_id", "rating"]].itertuples(
-            index=False, name=None
+    rmse = None
+    mae = None
+    if not test_ratings.empty:
+        testset = list(
+            test_ratings[["user_id", "movie_id", "rating"]].itertuples(
+                index=False, name=None
+            )
         )
-    )
-    predictions = algo.test(testset)
-    rmse = accuracy.rmse(predictions, verbose=False)
-    mae = accuracy.mae(predictions, verbose=False)
+        predictions = algo.test(testset)
+        rmse = float(accuracy.rmse(predictions, verbose=False))
+        mae = float(accuracy.mae(predictions, verbose=False))
 
     artifact = {
         "algorithm": algo,
@@ -96,8 +99,8 @@ def train_model(data: PreparedModelData, model_path=DEFAULT_MODEL_PATH):
         "stats": {
             "training_ratings": len(train_ratings),
             "testing_ratings": len(test_ratings),
-            "rmse": float(rmse),
-            "mae": float(mae),
+            "rmse": rmse,
+            "mae": mae,
         },
     }
     model_path = Path(model_path)
