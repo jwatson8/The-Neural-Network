@@ -1,11 +1,12 @@
 # VM deployment runbook for Milestone 1
 
-**Status: implementation plan and configuration templates, not a deployed service.**
-The existing M0 model is a command-line program. The team still needs to implement
-the HTTP adapter and live cold-start worker described below. Do not treat the
-Compose template as runnable until those modules and the model artifact exist.
-No VM commands have been executed or containers tested as part of this runbook.
-This plan does not choose the team's production model in advance of comparison.
+**Status: application and container configuration are implemented, but not deployed.**
+The API, SQLite-backed cold-start worker, [Dockerfile](../Dockerfile), and
+[Compose file](../compose.yaml) are present. Deployment still requires a trusted
+model bundle, a configured user lookup endpoint, and an OpenAI API key. No VM
+deployment or live course-traffic test has been performed. Account-created Kafka
+consumption is not implemented; unknown recommendation requests currently enqueue
+cold-start work.
 
 The course requires `http://VM_ADDRESS:8082/recommend/USER_ID` to return one ordered
 comma-separated line of up to 20 movie IDs within 600 ms. A working container alone
@@ -93,41 +94,32 @@ cloned, reuse the directory and inspect `git status --short` before switching
 versions. Keep implementation edits in a development checkout and commit/push them;
 the VM should deploy those commits, not become the only copy of important changes.
 
-## 4. Implement these repository files before deployment
+## 4. Application behavior and deployment inputs
 
-Suggested file contract (paths below are a proposal, not existing modules):
+The implemented service modules are:
 
 ```text
-Dockerfile
-compose.yaml
-.dockerignore
-.env.example
-requirements.txt
-requirements-service.txt
-service/__init__.py
-service/api.py              # exports a Flask app named app
-service/profile_worker.py   # runnable with python -m service.profile_worker
-service/model_adapter.py    # interfaces to whichever model wins comparison
-artifacts/model.joblib      # generated/downloaded trusted model, ignored by Git
+src/service/api.py             # Flask app, request routing and response
+src/service/model_adapter.py   # SVD/content/popularity inference
+src/service/profile_worker.py  # asynchronous profile generation
+src/service/store.py           # SQLite profiles and deduplicated job queue
+artifacts/model.joblib         # externally supplied trusted model bundle
 ```
 
-**Frank's API implementation:** load the selected model once at startup, then
-handle `/recommend/<userid>`, rank/filter real catalog IDs, and return
+The API loads the model once at startup, handles `/recommend/<userid>`, ranks
+catalog IDs, and returns
 `Response(','.join(movie_ids[:20]), mimetype='text/plain')`. The course response
 must not contain JSON, titles or scores. Add `/health` returning 200 only after
-the model is loaded and profile-store reads are available. Keep training, LLM
-generation and slow metadata requests outside the recommendation request path.
-Log user ID, route (collaborative/content/fallback), model version, duration and
-status so the team can inspect performance and personalization.
+the model is loaded and profile-store reads are available. Training, LLM
+generation and slow metadata requests stay outside the recommendation request
+path. Logs include user ID, route, model version, duration and status.
 
-**Cold-start implementation:** consume account-created events, retrieve the new
-user's descriptions from the course API, call the selected LLM, validate its
-output, and save the profile in a persistent store. Also queue an unknown ID
-encountered by the API to cover delayed/missed account events. Deduplicate jobs,
-retry failures with backoff and commit Kafka progress only after durable handling.
-The request handler returns a fast fallback while work is pending, then uses the
-new profile without retraining or restarting the service. Never count pending
-fallback responses as personalized.
+When an unknown ID is requested, the API queues it and immediately returns
+popularity fallback results. The worker polls SQLite, retrieves descriptions from
+the configured user API, calls OpenAI, validates the structured profile, and
+persists it. Failed jobs are retried with backoff. Later requests can use the
+stored profile without retraining or restarting the service. Pending fallback
+responses are not personalized responses.
 
 For a small single-VM design, SQLite with WAL, short transactions and a busy timeout
 can store profiles and pending jobs in a shared Docker volume. All instances must
@@ -136,10 +128,10 @@ health succeeds; the worker then starts. A different shared store is acceptable
 if the team documents it. Saved M0 `llm_profiles.json` entries can seed the store,
 but they do not replace live profile generation.
 
-The current `recommender.py` needs an adapter change: it rejects profiles whose
-user ID is absent from the original fitted user list. The live content route must
-accept a freshly retrieved user description/profile independently of that list.
-The existing `cold_start.py` is an offline batch command, not a Kafka consumer.
+The selected model must be serialized in the bundle shape expected by
+`src/service/model_adapter.py`. Kafka account-event ingestion and its course
+payload/credential contract remain future work; the current queue trigger is an
+unknown recommendation request.
 
 ## 5. Containerize the implementation
 
@@ -149,123 +141,25 @@ Kafka client, and any LLM client needed. Pin tested versions, include transitive
 dependencies in your agreed lock process, and retain the selected model's numeric
 library versions to avoid artifact incompatibilities.
 
-Example **Dockerfile**, once the Step 4 files exist:
-
-```dockerfile
-FROM python:3.12-slim-bookworm
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-WORKDIR /app
-COPY requirements.txt requirements-service.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-service.txt
-COPY . .
-RUN useradd --uid 10001 --create-home appuser \
-    && mkdir -p /state /models \
-    && chown appuser:appuser /state /models
-USER appuser
-EXPOSE 8082
-CMD ["gunicorn", "--bind", "0.0.0.0:8082", "--workers", "1", "--threads", "4", "--access-logfile", "-", "--error-logfile", "-", "service.api:app"]
-```
-
-This starts one model-holding process with four request threads. Test model/thread
-safety, contention and latency on the VM before increasing concurrency. Pin the
-tested base image by digest when finalizing a reproducible release. Gunicorn's
-worker timeout is not the course's 600 ms response budget; measure actual HTTP
-latency separately and enforce bounded work in the handler.
-
-Example **.dockerignore**:
-
-```text
-.git
-.venv
-__pycache__
-*.pyc
-.env
-.env.*
-!.env.example
-data
-artifacts
-*.zip
-```
-
-Exclude raw data and model artifacts because this design mounts a prebuilt model.
-Add `.env`, `data/` and `artifacts/` to `.gitignore` as well. Never bake credentials
-into an image or print the full environment/expanded Compose configuration into
-shared logs.
+The root [Dockerfile](../Dockerfile) installs the pinned service and model
+dependencies, runs as UID 10001, and starts Gunicorn with one worker and four
+threads. The model is not copied into the image. The root `.dockerignore` excludes
+local state, data, artifacts and environment files; keep credentials out of images
+and shared logs. Test model/thread safety, contention and latency on the VM before
+increasing concurrency. Gunicorn's worker timeout is not the course's 600 ms
+response budget; measure actual HTTP latency separately.
 
 ## 6. Add compose.yaml
 
-This is the **two-process deployment template**. The Step 4 API and worker must
-honor the environment variables and shared-store contract; Docker does not
-implement these application behaviors for you.
+The root [compose.yaml](../compose.yaml) builds the same image for the API and
+worker. It publishes only the API on port 8082, mounts the model read-only, and
+shares a persistent named volume for profile/job state. The worker starts after
+the API healthcheck succeeds. That dependency gates startup; it does not supervise
+the application forever. A healthcheck reports health but does not itself restart
+an unhealthy, still-running process. Source: [Compose startup behavior](https://docs.docker.com/compose/how-tos/startup-order/).
 
-```yaml
-name: neural-network
-
-x-runtime: &runtime
-  image: neural-network:${DEPLOY_TAG:-local}
-  build: .
-  restart: unless-stopped
-  init: true
-  env_file:
-    - .env
-  environment:
-    MODEL_PATH: /models/model.joblib
-    PROFILE_DB_PATH: /state/profiles.sqlite3
-    OPENBLAS_NUM_THREADS: "1"
-    OMP_NUM_THREADS: "1"
-    MKL_NUM_THREADS: "1"
-  volumes:
-    - type: bind
-      source: ${MODEL_FILE:?Set MODEL_FILE in .env}
-      target: /models/model.joblib
-      read_only: true
-      bind:
-        create_host_path: false
-    - profiles:/state
-  logging:
-    driver: json-file
-    options:
-      max-size: "10m"
-      max-file: "3"
-
-services:
-  api:
-    <<: *runtime
-    ports:
-      - "8082:8082"
-    command: ["gunicorn", "--bind", "0.0.0.0:8082", "--workers", "1", "--threads", "4", "--access-logfile", "-", "--error-logfile", "-", "service.api:app"]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2)"]
-      interval: 15s
-      timeout: 3s
-      retries: 3
-      start_period: 30s
-
-  cold-start-worker:
-    <<: *runtime
-    command: ["python", "-m", "service.profile_worker"]
-    depends_on:
-      api:
-        condition: service_healthy
-
-volumes:
-  profiles:
-```
-
-The same image serves HTTP and runs the background worker, so dependencies stay
-consistent. The named volume survives ordinary container recreation. Keep database
-schema changes backward compatible during this milestone. The `service_healthy`
-condition gates initial worker startup; it does not supervise the application
-forever. A healthcheck reports health; it does not itself restart an unhealthy but
-still-running process. Source: [Compose startup behavior](https://docs.docker.com/compose/how-tos/startup-order/).
-
-The template deliberately leaves the LLM provider configurable. If using an external
-API, use a key accessible to the team/staff through the agreed secure method. If
-using Ollama, add a real Ollama container and a persistent model cache, pull the
-selected model before enabling the worker, and budget VM RAM/disk for it. Inside
-the worker container, `localhost` is the worker itself, not the VM or a separate
-Ollama container. Use its Compose service name, such as `http://ollama:11434`, and
-do not publish that port externally. The API profile cache is not an LLM.
+The current worker uses the external OpenAI API. Keep its key in the untracked
+`.env`; do not put credentials into the image. The API profile cache is not an LLM.
 
 ## 7. Prepare a versioned model and environment
 
@@ -290,35 +184,19 @@ chmod 600 .env
 ```
 
 Replace the path above. Do not rerun `cp .env.example .env` over a configured `.env`.
-Example tracked **.env.example**; fill real settings only in the untracked `.env`:
-
-```dotenv
-DEPLOY_TAG=REPLACE_WITH_COMMIT_SHA
-MODEL_FILE=./artifacts/model-v1.joblib
-MODEL_VERSION=model-v1
-KAFKA_BOOTSTRAP_SERVERS=REPLACE_WITH_COURSE_VALUE
-KAFKA_TOPIC=movielogTEAM_NUMBER
-KAFKA_GROUP_ID=team-TEAM_NUMBER-cold-start-v1
-USER_API_BASE_URL=http://REPLACE_WITH_COURSE_HOST:8080
-LLM_PROVIDER=REPLACE_WITH_IMPLEMENTED_PROVIDER
-LLM_MODEL=REPLACE_WITH_SELECTED_MODEL
-LLM_BASE_URL=REPLACE_WITH_PROVIDER_URL
-LLM_API_KEY=
-```
-
-Add authentication/TLS variables to match the actual course Kafka client setup.
-These names are the proposed application contract, not claims about supplied
-credentials. Choose a Kafka start/reset policy intentionally: do not blindly replay
-all historical accounts into paid LLM calls or skip accounts needed for coverage.
-Ensure the mounted model is readable by container UID 10001 and only load trusted
-joblib artifacts. Record data snapshot, source commit and artifact hash.
+Copy the tracked [.env.example](../.env.example) to the private `.env` and set
+`MODEL_FILE`, `MODEL_VERSION`, `USER_LOOKUP_URL_TEMPLATE`, and `OPENAI_API_KEY` for
+the deployment. The example's user URL is a placeholder. `.gitignore` excludes
+`.env`, generated model/data directories, and SQLite journal files. Ensure the
+mounted model is readable by container UID 10001 and only load trusted joblib
+artifacts. Record data snapshot, source commit and artifact hash.
 
 ## 8. Validate and start
 
-From the team repository root on the VM, once Steps 4–7 are complete:
+From the team repository root on the VM, once the environment and model are ready:
 
 ```sh
-test -s artifacts/model-v1.joblib
+test -s artifacts/model.joblib
 sudo docker compose config --quiet
 sudo docker compose up -d --build --wait --wait-timeout 120
 sudo docker compose ps
@@ -327,7 +205,7 @@ sudo docker compose logs --tail=100 api cold-start-worker
 
 The first command checks the example artifact path; update it if using another
 version. `--wait` waits for running/healthy service state, not for evidence that
-Kafka consumption or LLM generation works. Source: [docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/).
+LLM generation works. Source: [docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/).
 
 ## 9. Test on the VM, then from your laptop
 

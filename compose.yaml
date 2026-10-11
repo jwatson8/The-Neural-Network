@@ -1,0 +1,64 @@
+name: the-neural-network
+
+x-environment: &environment
+  PROFILE_DB_PATH: /state/profiles.sqlite3
+  MODEL_VERSION: ${MODEL_VERSION:-unknown}
+  USER_LOOKUP_URL_TEMPLATE: ${USER_LOOKUP_URL_TEMPLATE:?Set USER_LOOKUP_URL_TEMPLATE in .env}
+  USER_LOOKUP_TIMEOUT_SECONDS: ${USER_LOOKUP_TIMEOUT_SECONDS:-3}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+  OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-20}
+  PROFILE_POLL_SECONDS: ${PROFILE_POLL_SECONDS:-0.5}
+
+x-service: &service
+  image: the-neural-network:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  init: true
+  environment: *environment
+  volumes:
+    - profiles:/state
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  api:
+    <<: *service
+    environment:
+      <<: *environment
+      MODEL_PATH: /models/model.joblib
+    ports:
+      - "8082:8082"
+    volumes:
+      - profiles:/state
+      - type: bind
+        source: ${MODEL_FILE:?Set MODEL_FILE in .env}
+        target: /models/model.joblib
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2)"
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+
+  cold-start-worker:
+    <<: *service
+    command: ["python", "-m", "src.service.profile_worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  profiles:
