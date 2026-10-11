@@ -30,18 +30,23 @@ class PreferenceProfile(BaseModel):
 def fetch_descriptions(user_id):
     template = os.environ['USER_LOOKUP_URL_TEMPLATE']
     url = template.format(user_id=quote(user_id, safe=''))
-    request = Request(url, headers={'Accept': 'application/json'})
+    headers = {'Accept': 'application/json'}
+    if os.getenv('USER_API_BEARER_TOKEN'):
+        headers['Authorization'] = 'Bearer ' + os.environ['USER_API_BEARER_TOKEN']
+    request = Request(url, headers=headers)
     timeout = float(os.getenv('USER_LOOKUP_TIMEOUT_SECONDS', '3'))
     with urlopen(request, timeout=timeout) as response:
         payload = json.load(response)
     if isinstance(payload, dict) and isinstance(payload.get('user'), dict):
         payload = payload['user']
-    likes = payload.get('self_description_likes', '')
-    dislikes = payload.get('self_description_dislikes', '')
+    likes_field = os.getenv('USER_LIKES_FIELD', 'self_description_likes')
+    dislikes_field = os.getenv('USER_DISLIKES_FIELD', 'self_description_dislikes')
+    if not isinstance(payload, dict) or not ({likes_field, dislikes_field} & payload.keys()):
+        raise ValueError('User lookup schema does not contain configured preference fields')
+    likes = payload.get(likes_field, '')
+    dislikes = payload.get(dislikes_field, '')
     if not isinstance(likes, str) or not isinstance(dislikes, str):
         raise ValueError('User lookup descriptions must be strings')
-    if not likes.strip() and not dislikes.strip():
-        raise ValueError('User lookup returned no preference descriptions')
     return likes, dislikes
 
 
@@ -51,6 +56,8 @@ def generate_profile(client, model_name, likes, dislikes):
         instructions=INSTRUCTIONS,
         input=json.dumps({'likes': likes, 'dislikes': dislikes}, ensure_ascii=False),
         text_format=PreferenceProfile,
+        max_output_tokens=500,
+        store=False,
     )
     profile = response.output_parsed
     if profile is None:
@@ -65,7 +72,9 @@ def process_one(store, client, model_name):
     user_id = job['user_id']
     try:
         likes, dislikes = fetch_descriptions(user_id)
-        profile = generate_profile(client, model_name, likes, dislikes)
+        profile = (generate_profile(client, model_name, likes, dislikes)
+                   if likes.strip() or dislikes.strip()
+                   else PreferenceProfile(positive='', negative=''))
         store.save_profile(user_id, profile.positive, profile.negative)
         logger.info('profile_created user_id=%s attempts=%d', user_id, job['attempts'])
     except Exception as error:
@@ -78,9 +87,11 @@ def process_one(store, client, model_name):
 
 
 def main():
+    if not os.getenv('USER_LOOKUP_URL_TEMPLATE') or not os.getenv('OPENAI_API_KEY'):
+        raise ValueError('Set USER_LOOKUP_URL_TEMPLATE and OPENAI_API_KEY before enabling live profiling')
     store = ProfileStore(os.getenv('PROFILE_DB_PATH', 'state/profiles.sqlite3'))
     timeout = float(os.getenv('OPENAI_TIMEOUT_SECONDS', '20'))
-    client = OpenAI(timeout=timeout)
+    client = OpenAI(timeout=timeout, max_retries=0)
     model_name = os.getenv('OPENAI_MODEL', 'gpt-4.1-mini')
     poll_seconds = float(os.getenv('PROFILE_POLL_SECONDS', '0.5'))
     logger.info('profile_worker_started model=%s', model_name)

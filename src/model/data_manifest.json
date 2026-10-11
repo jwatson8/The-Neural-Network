@@ -1,0 +1,17 @@
+{
+  "events.csv.gz": {
+    "url": "https://media.githubusercontent.com/media/mlip-cmu-online/public-data/main/m0/data/events.csv.gz",
+    "sha256": "5c61b29f1eab57ae0ff122062390e312f6813c4751eaab466997cdb55b712efb",
+    "bytes": 503523
+  },
+  "movies.csv.gz": {
+    "url": "https://media.githubusercontent.com/media/mlip-cmu-online/public-data/main/m0/data/movies.csv.gz",
+    "sha256": "1e0dd97dccaff8cfe65d888cbdaec33e4a2673880818fbc3dcf859dc7806b147",
+    "bytes": 447227
+  },
+  "users.csv.gz": {
+    "url": "https://media.githubusercontent.com/media/mlip-cmu-online/public-data/main/m0/data/users.csv.gz",
+    "sha256": "7a7b2afbb598753af89cad7d865089d03dcaf0c834b2d42275f5918b97343809",
+    "bytes": 75056
+  }
+}

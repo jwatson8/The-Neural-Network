@@ -14,6 +14,7 @@ from src.service.model_adapter import recommend, validate_model
 from src.service.store import ProfileStore
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'))
 
 
 def create_app(model=None, profile_store=None, config=None):
@@ -21,11 +22,11 @@ def create_app(model=None, profile_store=None, config=None):
     app.config.update(
         MODEL_PATH=os.getenv(
             'MODEL_PATH',
-            str(Path(__file__).resolve().parents[1] / 'app' / 'fullTrainedModel' / 'jace_model.joblib'),
+            str(Path(__file__).resolve().parents[2] / 'artifacts' / 'model.joblib'),
         ),
         MODEL_VERSION=os.getenv('MODEL_VERSION', 'unknown'),
         PROFILE_DB_PATH=os.getenv('PROFILE_DB_PATH', 'state/profiles.sqlite3'),
-        PROFILE_SEED_PATH=os.getenv('PROFILE_SEED_PATH', 'llm_profiles.json'),
+        PROFILE_SEED_PATH=os.getenv('PROFILE_SEED_PATH', str(Path(__file__).resolve().parents[1] / 'model' / 'llm_profiles.json')),
     )
     if config:
         app.config.update(config)
@@ -76,6 +77,10 @@ def create_app(model=None, profile_store=None, config=None):
             else:
                 movie_ids, route = result
 
+        try:
+            store.record_response(user_id, movie_ids, route)
+        except sqlite3.Error:
+            logger.warning('response_audit_failed user_id=%s', user_id)
         elapsed_ms = (time.perf_counter() - started) * 1000
         logger.info(
             'recommendation user_id=%s route=%s model_version=%s duration_ms=%.2f status=200',
