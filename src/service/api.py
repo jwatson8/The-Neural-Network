@@ -9,6 +9,7 @@ from pathlib import Path
 import joblib
 from flask import Flask, Response, jsonify
 
+from src.service.cold_start import recommend_cold_start
 from src.service.model_adapter import recommend, validate_model
 from src.service.store import ProfileStore
 
@@ -18,7 +19,10 @@ logger = logging.getLogger(__name__)
 def create_app(model=None, profile_store=None, config=None):
     app = Flask(__name__)
     app.config.update(
-        MODEL_PATH=os.getenv('MODEL_PATH', 'artifacts/model.joblib'),
+        MODEL_PATH=os.getenv(
+            'MODEL_PATH',
+            str(Path(__file__).resolve().parents[1] / 'app' / 'fullTrainedModel' / 'jace_model.joblib'),
+        ),
         MODEL_VERSION=os.getenv('MODEL_VERSION', 'unknown'),
         PROFILE_DB_PATH=os.getenv('PROFILE_DB_PATH', 'state/profiles.sqlite3'),
         PROFILE_SEED_PATH=os.getenv('PROFILE_SEED_PATH', 'llm_profiles.json'),
@@ -55,17 +59,22 @@ def create_app(model=None, profile_store=None, config=None):
         if loaded_model is None:
             return Response('Model unavailable', status=503, mimetype='text/plain')
 
-        try:
-            profile = store.get_profile(user_id)
-        except sqlite3.Error:
-            profile = None
-            logger.warning('profile_store_read_failed user_id=%s', user_id)
-        movie_ids, route = recommend(loaded_model, user_id, profile, k=20)
-        if profile is None and not loaded_model['seen'].get(user_id):
+        if loaded_model['seen'].get(user_id):
+            movie_ids, route = recommend(loaded_model, user_id, k=20)
+        else:
             try:
-                store.enqueue(user_id)
+                result = recommend_cold_start(loaded_model, store, user_id, k=20)
             except sqlite3.Error:
-                logger.warning('profile_job_enqueue_failed user_id=%s', user_id)
+                result = None
+                logger.warning('cold_start_store_read_failed user_id=%s', user_id)
+            if result is None:
+                movie_ids, route = recommend(loaded_model, user_id, k=20)
+                try:
+                    store.enqueue(user_id)
+                except sqlite3.Error:
+                    logger.warning('profile_job_enqueue_failed user_id=%s', user_id)
+            else:
+                movie_ids, route = result
 
         elapsed_ms = (time.perf_counter() - started) * 1000
         logger.info(

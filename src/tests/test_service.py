@@ -29,8 +29,11 @@ class ContentMatrix:
 class Vectorizer:
     def transform(self, phrases):
         return np.array([
-            [1.0, 0.0] if phrases[0] == 'action' else [0.0, 1.0],
-            [0.0, 0.0],
+            [1.0, 0.0, 0.0] if 'action' in phrase.lower()
+            else [0.0, 1.0, 0.0] if 'drama' in phrase.lower()
+            else [0.0, 0.0, 1.0] if 'unique-tag' in phrase.lower()
+            else [0.0, 0.0, 0.0]
+            for phrase in phrases
         ])
 
 
@@ -93,16 +96,57 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertLess(elapsed, 0.6)
 
-    def test_profile_personalizes_a_user_absent_from_svd_index(self):
-        model = self.app.extensions['recommendation_model']
-        self.store.save_profile('new-user', 'action', '')
-        ids, route = recommend(model, 'new-user', self.store.get_profile('new-user'))
-        self.assertEqual(route, 'llm_content')
-        self.assertEqual(ids[0], 'movie-1')
+    def test_new_database_user_gets_database_backed_cold_start(self):
+        with self.store.connect() as connection:
+            connection.execute('''
+                INSERT INTO users (user_id, self_description_likes, self_description_dislikes)
+                VALUES (?, ?, ?)
+            ''', ('cold-user', 'unique-tag', ''))
+            connection.executemany('''
+                INSERT INTO movies (movie_id, title, genres, popularity)
+                VALUES (?, ?, ?, ?)
+            ''', [
+                ('action-db', 'Unique pick', 'unique-tag', 1),
+                ('drama-db', 'Drama pick', 'Drama', 100),
+            ])
+
+        response = self.client.get('/recommend/cold-user')
+        ids = response.get_data(as_text=True).split(',')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ids[0], 'action-db')
+        self.assertIn('drama-db', ids)
+
+    def test_saved_profile_personalizes_user_without_database_account(self):
+        with self.store.connect() as connection:
+            connection.execute('''
+                INSERT INTO movies (movie_id, title, genres, popularity)
+                VALUES (?, ?, ?, ?)
+            ''', ('profile-db', 'Profile pick', 'unique-tag', 1))
+        self.store.save_profile('profile-user', 'unique-tag', '')
+
+        response = self.client.get('/recommend/profile-user')
+        ids = response.get_data(as_text=True).split(',')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ids[0], 'profile-db')
 
     def test_health_requires_model_and_profile_store(self):
         response = self.client.get('/health')
         self.assertEqual(response.status_code, 200)
+
+    def test_initialization_populates_dataset_tables_idempotently(self):
+        expected_counts = {'events': 54704, 'movies': 2569, 'users': 1050}
+        self.store.initialize()
+        with self.store.connect() as connection:
+            counts = {
+                table: connection.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
+                for table in expected_counts
+            }
+            first_movie = connection.execute(
+                'SELECT title FROM movies WHERE movie_id = ?',
+                ('...and+justice+for+all+1979',),
+            ).fetchone()
+        self.assertEqual(counts, expected_counts)
+        self.assertEqual(first_movie['title'], '...And Justice for All')
 
 
 if __name__ == '__main__':
