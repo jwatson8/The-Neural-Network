@@ -1,8 +1,12 @@
+from pathlib import Path
+
 import pandas as pd
 
-EVENTS_PATH = "data/events.csv.gz"
-USERS_PATH = "data/users.csv.gz"
-MOVIES_PATH = "data/movies.csv.gz"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_PATH = PROJECT_ROOT / "data"
+EVENTS_PATH = DATA_PATH / "events.csv.gz"
+USERS_PATH = DATA_PATH / "users.csv.gz"
+MOVIES_PATH = DATA_PATH / "movies.csv.gz"
 
 
 def load_data():
