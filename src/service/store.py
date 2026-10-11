@@ -1,6 +1,7 @@
 """SQLite-backed cold-start profiles and deduplicated work queue."""
 
 import json
+import hashlib
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -44,6 +45,23 @@ class ProfileStore:
                     next_attempt_at REAL NOT NULL,
                     lease_until REAL NOT NULL DEFAULT 0,
                     created_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS response_audit (
+                    id INTEGER PRIMARY KEY,
+                    served_at REAL NOT NULL,
+                    user_id TEXT NOT NULL,
+                    result_hash TEXT NOT NULL,
+                    route TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS audit_lookup
+                    ON response_audit(user_id, result_hash, served_at);
+                CREATE TABLE IF NOT EXISTS course_requests (
+                    topic TEXT NOT NULL,
+                    partition_id INTEGER NOT NULL,
+                    offset_id INTEGER NOT NULL,
+                    received_at REAL NOT NULL,
+                    raw_line TEXT NOT NULL,
+                    PRIMARY KEY(topic, partition_id, offset_id)
                 );
             ''')
 
@@ -96,6 +114,21 @@ class ProfileStore:
                 INSERT OR IGNORE INTO profile_jobs (user_id, next_attempt_at, created_at)
                 VALUES (?, ?, ?)
             ''', (user_id, now, now))
+
+    def record_response(self, user_id, movie_ids, route):
+        digest = hashlib.sha256(','.join(movie_ids).encode()).hexdigest()
+        with self.connect() as connection:
+            connection.execute(
+                'INSERT INTO response_audit(served_at,user_id,result_hash,route) VALUES (?,?,?,?)',
+                (time.time(), user_id, digest, route),
+            )
+
+    def record_course_request(self, topic, partition_id, offset_id, line):
+        with self.connect() as connection:
+            connection.execute(
+                'INSERT OR IGNORE INTO course_requests VALUES (?,?,?,?,?)',
+                (topic, partition_id, offset_id, time.time(), line),
+            )
 
     def claim_next(self, lease_seconds=60):
         now = time.time()

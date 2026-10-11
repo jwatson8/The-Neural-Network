@@ -26,7 +26,7 @@ def recommend(model, user_id, profile=None, k=20):
         user_index = model['ui'][user_id]
         scores = model['user_factors'][user_index] @ model['movie_factors']
         route = 'collaborative_svd'
-    elif profile is not None:
+    elif profile is not None and (profile.get('positive', '').strip() or profile.get('negative', '').strip()):
         query = model['vectorizer'].transform([
             profile.get('positive', ''), profile.get('negative', ''),
         ])

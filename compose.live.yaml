@@ -1,0 +1,34 @@
+# Use together with compose.smoke.yaml to retain the existing profiles volume.
+services:
+  profile-worker:
+    build: .
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "src.service.profile_worker"]
+    env_file: .env
+    environment:
+      PROFILE_DB_PATH: /state/profiles.sqlite3
+    volumes:
+      - smoke-profiles:/state
+    depends_on:
+      api:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  course-stream:
+    build: .
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "src.service.course_stream"]
+    env_file: .env
+    environment:
+      PROFILE_DB_PATH: /state/profiles.sqlite3
+    volumes:
+      - smoke-profiles:/state
+    depends_on:
+      api:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
