@@ -1,12 +1,12 @@
-"""Inference adapter for the Milestone 0 SVD/content model bundle."""
+"""Inference adapter for existing users in the trained Jace model."""
 
 import numpy as np
 
 
 def validate_model(model):
     required = {
-        'movies', 'mi', 'ui', 'seen', 'user_factors', 'movie_factors',
-        'vectorizer', 'content', 'popularity',
+        'movies', 'ui', 'seen', 'user_factors', 'movie_factors', 'vectorizer',
+        'popularity',
     }
     missing = required.difference(model)
     if missing:
@@ -17,7 +17,7 @@ def validate_model(model):
         raise ValueError('Movie factors do not match the catalog')
 
 
-def recommend(model, user_id, profile=None, k=20):
+def recommend(model, user_id, k=20):
     if not 1 <= k <= 20:
         raise ValueError('k must be between 1 and 20')
 
@@ -26,13 +26,6 @@ def recommend(model, user_id, profile=None, k=20):
         user_index = model['ui'][user_id]
         scores = model['user_factors'][user_index] @ model['movie_factors']
         route = 'collaborative_svd'
-    elif profile is not None:
-        query = model['vectorizer'].transform([
-            profile.get('positive', ''), profile.get('negative', ''),
-        ])
-        matches = (model['content'] @ query.T).toarray()
-        scores = matches[:, 0] - 0.7 * matches[:, 1] + 0.02 * model['popularity']
-        route = 'llm_content'
     else:
         scores = model['popularity'].copy()
         route = 'popularity_fallback'

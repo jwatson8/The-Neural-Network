@@ -1,5 +1,7 @@
 """SQLite-backed cold-start profiles and deduplicated work queue."""
 
+import csv
+import gzip
 import json
 import sqlite3
 import time
@@ -32,6 +34,39 @@ class ProfileStore:
             connection.execute('PRAGMA journal_mode=WAL')
             connection.execute('PRAGMA busy_timeout=5000')
             connection.executescript('''
+                CREATE TABLE IF NOT EXISTS events (
+                    event_id INTEGER PRIMARY KEY,
+                    timestamp TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    movie_id TEXT,
+                    rating REAL
+                );
+                CREATE INDEX IF NOT EXISTS events_user_id_idx ON events(user_id);
+                CREATE INDEX IF NOT EXISTS events_movie_id_idx ON events(movie_id);
+                CREATE TABLE IF NOT EXISTS movies (
+                    movie_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    genres TEXT,
+                    release_date TEXT,
+                    runtime INTEGER,
+                    original_language TEXT,
+                    overview TEXT,
+                    popularity REAL,
+                    vote_average REAL,
+                    vote_count INTEGER,
+                    imdb_id TEXT,
+                    tmdb_id TEXT,
+                    license_cost REAL
+                );
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id TEXT PRIMARY KEY,
+                    age INTEGER,
+                    occupation TEXT,
+                    gender TEXT,
+                    self_description_likes TEXT,
+                    self_description_dislikes TEXT
+                );
                 CREATE TABLE IF NOT EXISTS profiles (
                     user_id TEXT PRIMARY KEY,
                     positive TEXT NOT NULL,
@@ -46,6 +81,53 @@ class ProfileStore:
                     created_at REAL NOT NULL
                 );
             ''')
+            self._populate_datasets(connection)
+
+    def _populate_datasets(self, connection):
+        data_dir = Path(__file__).resolve().parents[1] / 'app' / 'data'
+        for table, filename, columns, converters in (
+            ('movies', 'movies.csv.gz', (
+                'movie_id', 'title', 'genres', 'release_date', 'runtime',
+                'original_language', 'overview', 'popularity', 'vote_average',
+                'vote_count', 'imdb_id', 'tmdb_id', 'license_cost',
+            ), {'runtime': int, 'popularity': float, 'vote_average': float,
+                'vote_count': int, 'license_cost': float}),
+            ('users', 'users.csv.gz', (
+                'user_id', 'age', 'occupation', 'gender',
+                'self_description_likes', 'self_description_dislikes',
+            ), {'age': int}),
+            ('events', 'events.csv.gz', (
+                'timestamp', 'user_id', 'event_type', 'movie_id', 'rating',
+            ), {'rating': float}),
+        ):
+            source_path = data_dir / Path(filename).stem
+            if not source_path.is_file():
+                source_path = data_dir / filename
+            open_dataset = gzip.open if source_path.suffix == '.gz' else open
+            with open_dataset(source_path, 'rt', newline='', encoding='utf-8') as stream:
+                rows = csv.DictReader(stream)
+                if table == 'events':
+                    fields = ('event_id', *columns)
+                    placeholders = ', '.join('?' for _ in fields)
+                    sql = f'INSERT OR IGNORE INTO events ({", ".join(fields)}) VALUES ({placeholders})'
+                    values = (
+                        (event_id, *(
+                            converters.get(column, str)(row[column]) if row[column] else None
+                            for column in columns
+                        ))
+                        for event_id, row in enumerate(rows, start=1)
+                    )
+                else:
+                    placeholders = ', '.join('?' for _ in columns)
+                    sql = f'INSERT OR IGNORE INTO {table} ({", ".join(columns)}) VALUES ({placeholders})'
+                    values = (
+                        tuple(
+                            converters.get(column, str)(row[column]) if row[column] else None
+                            for column in columns
+                        )
+                        for row in rows
+                    )
+                connection.executemany(sql, values)
 
     def healthy(self):
         with self.connect() as connection:
@@ -59,6 +141,29 @@ class ProfileStore:
                 (user_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def get_cold_start_data(self, user_id):
+        with self.connect() as connection:
+            user = connection.execute('''
+                SELECT self_description_likes, self_description_dislikes
+                FROM users WHERE user_id = ?
+            ''', (user_id,)).fetchone()
+            profile = connection.execute(
+                'SELECT positive, negative FROM profiles WHERE user_id = ?',
+                (user_id,),
+            ).fetchone()
+            if user is None and profile is None:
+                return None
+            movies = connection.execute('''
+                SELECT movie_id, title, genres, overview, popularity
+                FROM movies
+                ORDER BY COALESCE(popularity, 0) DESC, movie_id
+            ''').fetchall()
+        return {
+            'user': dict(user) if user else {},
+            'profile': dict(profile) if profile else None,
+            'movies': [dict(movie) for movie in movies],
+        }
 
     def save_profile(self, user_id, positive, negative):
         with self.connect() as connection:
