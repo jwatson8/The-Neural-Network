@@ -126,6 +126,8 @@ On the VM, training and six HTTP smoke checks passed. The integrated service ret
 
 ## Meeting Note
 - [Meeting Notes](https://docs.google.com/document/d/1KkiqGav8hNbT_1qaAIR9rnov3ghDki5VzYoF1GzO2R4/edit?tab=t.68e54dbq2yxa)
+- [Project Board](https://github.com/users/jwatson8/projects/1).  
+- [Issues](https://github.com/jwatson8/The-Neural-Network/issues).
 
 ## Communication Norms and Expectations
 
@@ -163,7 +165,3 @@ The team agreed on this escalation process:
 ## Handling Unresponsive Members, Problems, and Delays
 
 Team members are expected to check and respond to messages **within the day** through Teams. For urgent matters, members will first attempt a Teams call, followed by a phone call using the contact information pinned in Teams. If the team member cannot be reached by phone, we will notify our TA, **Shantanu**. If a team member encounters difficulties or delays with their assigned tasks, other team members can step in to provide assistance and help resolve the issues.
-
-## Project Board and Issues
-The project board for The Neural Network can be found [here](https://github.com/users/jwatson8/projects/1).  
-The issues board for The Neural Network can be found [here](https://github.com/jwatson8/The-Neural-Network/issues).
