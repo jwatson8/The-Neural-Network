@@ -15,7 +15,7 @@ python -m flask --app src.service.api run --host 127.0.0.1 --port 8082
 ```
 
 Training verifies the SHA-256 hashes of the three course CSV files already in
-`milestones/milestoneOne/modelTesting/data`, then writes `artifacts/model.joblib`
+`planning/Milestone1/modelTesting/data`, then writes `artifacts/model.joblib`
 and an adjacent provenance JSON file. No copy from someone's laptop is required.
 Missing data may be downloaded with `python -m src.model.prepare --download`.
 The prepared model uses all recorded interactions; holdout metrics remain separate.

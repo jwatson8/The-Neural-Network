@@ -5,26 +5,45 @@ Review/merge the integration PR first or check out its branch for a team-approve
 test. Keep `.env` private. API-only deployment works without external credentials;
 full M1 cold-start operation requires the course services and an authorized LLM key.
 
-## 1. Prepare alongside the running smoke service
+## 1. Prepare in the shared deployment directory
 
-Use a separate checkout so the old service remains reproducible during testing:
+The integrated API is now running from `/home/the-neural-network`. Training, staging
+and an external HTTP request have passed. The OpenAI key loaded from the private
+`.env` and authenticated, but live profile generation and Kafka are not yet verified.
+PR #36 is merged; later changes must be tested before replacing the running image.
+
+Use the shared checkout and retain its `neuralnetwork` group ownership. Inspect
+local edits before updating; coordinate branch changes with teammates:
 
 ```sh
-cd ~/apps
-git clone --branch integration/m0-flask-deployment https://github.com/jwatson8/The-Neural-Network.git The-Neural-Network-integrated
-cd The-Neural-Network-integrated
-git rev-parse HEAD
+cd /home/the-neural-network
+git -c safe.directory=/home/the-neural-network status --short
+git -c safe.directory=/home/the-neural-network fetch origin
+```
+
+If clean and the team agrees to deploy current main:
+
+```sh
+git -c safe.directory=/home/the-neural-network switch main
+git -c safe.directory=/home/the-neural-network merge --ff-only origin/main
+git -c safe.directory=/home/the-neural-network rev-parse HEAD
 mkdir -p artifacts
-cp .env.example .env
+cp -n .env.example .env
 chmod 600 .env
 sudo docker compose build api
+```
+
+The existing `.env` contains private configuration; `cp -n` must not overwrite it.
+For initial training only, before any API uses this model file:
+
+```sh
 sudo env LOCAL_UID="$(id -u)" LOCAL_GID="$(id -g)" docker compose --profile tools run --rm train
 ```
 
-If using the merged PR, clone `main` instead. If the checkout or `.env` already
-exists, reuse it and preserve any existing edits/configuration. This creates a
-fresh M0 model using the included, checksum-verified dataset. It does not retrain
-from live events. Record the source commit and `artifacts/model.json`.
+For future model updates, create a separate versioned artifact/release and validate
+it first rather than overwriting the active artifact. Record the source commit and
+`artifacts/model.json`. Training verifies the recorded dataset under
+`planning/Milestone1/modelTesting/data`; it does not train from live events.
 
 ## 2. Test on an alternate port before switching production
 
@@ -39,7 +58,7 @@ test checks warm, seeded cold and unknown users, valid catalog IDs, formatting,
 seen-item filtering and sampled response latency. Inspect logs if anything fails:
 `sudo docker compose -p neural-network-staging logs --tail=80 api`.
 
-## 3. Switch the VM after the staging checks pass
+## 3. Switch the VM after the staging checks pass (initial migration)
 
 Stop only the known old API container after confirming its name with
 `sudo docker ps`. The previous deployment used `neural-network-smoke-api-1`:
@@ -132,10 +151,11 @@ before future incompatible schema changes; this PR only adds tables/indexes.
 
 ## What has been verified
 
-Local tests: checksum-verified training on 54,704 events; 14 tests covering API,
-queue/persistence/retry, all 50 cached profiles and three warm-user rankings matching
-M0, and a new user receiving personalized results after background processing.
-External services are mocked in those tests. GitHub Actions checks Linux Docker;
-inspect the PR check result. The existing smoke service was verified on the VM,
-but this integrated release still needs the staged VM commands above and real
-Kafka/user-API/LLM verification. No deployment is claimed by creating this PR.
+Local tests: 14 passed, including original M0 ranking equivalence and mocked
+background profiling. GitHub Actions passed Linux Docker build, training and HTTP
+checks. On the VM, containerized training covered 54,704 events, 1,050 users and
+2,569 movies; six staging smoke checks passed (3.1–5.8 ms), followed by a 5 ms
+VM-local port test. After switching the service, an external request returned 200
+in 273 ms. These samples do not establish sustained throughput. The OpenAI key
+loaded and authenticated successfully; actual LLM generation, user API lookup,
+Kafka processing and grading-window counts remain unverified.

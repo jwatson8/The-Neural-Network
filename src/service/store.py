@@ -97,7 +97,7 @@ class ProfileStore:
                 self._populate_datasets(connection)
 
     def _populate_datasets(self, connection):
-        data_dir = Path(os.getenv('DATASET_DIR', str(Path(__file__).resolve().parents[2] / 'milestones/milestoneOne/modelTesting/data')))
+        data_dir = Path(os.getenv('DATASET_DIR', str(Path(__file__).resolve().parents[2] / 'planning/Milestone1/modelTesting/data')))
         for table, filename, columns, converters in (
             ('movies', 'movies.csv.gz', (
                 'movie_id', 'title', 'genres', 'release_date', 'runtime',
