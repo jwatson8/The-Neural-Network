@@ -18,7 +18,7 @@ Models had to be slightly modified to fit the demands of this testing regiment. 
 ## Training Time
 ![Graphic representation of model differenc in training time](./modelTesting/results/graphs/average_training_time.png)
 ### Metric
-Average time of training on the same dataset.
+Average time of training and loading on the same dataset.
 ### Data
 Used the provided `events.csv.gz` dataset.
 ### Operationalization
@@ -29,7 +29,7 @@ Split the `events.csv.gz` dataset according to an `80/20` split (80% of data for
     Alvajoy: 203ms
     Nathan: 1460ms
 
-## Throughput
+## Inference Latency
 ![Graphic representation of model differenc in model inference time](./modelTesting/results/graphs/average_top20_request_time.png)
 ### Metric
 Average time, per request, to generate K-20 reccomendations for a given user.
@@ -62,7 +62,7 @@ Recall (@20)
 ### Data
 Use the models as described above in *Training Times*, and operationalize the testdata as described in *Throughput*
 ### Operationalization
-To calculate the value, for each model obtain a k-20 listing for the user. Go through the test data and find every movie in the test data for that user that scored above a baseline (x > 7.5). That comprises total-known relevent movies. Now, find the intersection between total known relevent moves and the k-20 model reccomendation for that user. the ratio of the two is recall @ 20. This is essentially recall (TP / TP + FN). Now calculate the average of these reccomendations accross every user in the dataset and calculate the mean. Do this for every model. Calculate against a baseline model (reccomend the top rated moves in the movie-dataset)
+To calculate the value, for each model obtain a k-20 listing for the user. Ensure that the no movies already-seen by the user are included in the k-20 reccomendation. Go through the test data and find every movie in the test data for that user that scored above a baseline (x > 7.5). That comprises total-known relevent movies. Now, find the intersection between total known relevent moves and the k-20 model reccomendation for that user. the ratio of the two is recall @ 20. This is essentially recall (TP / TP + FN). Now calculate the average of these reccomendations accross every user in the dataset and calculate the mean. Do this for every model. Calculate against a baseline model (reccomend the top rated moves in the movie-dataset)
 ### Results
     Baseline: .1%
     Jace: 16%
