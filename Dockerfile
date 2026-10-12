@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r src/requirements.txt -r src/requirements-servi
 
 COPY src ./src
 COPY deployment ./deployment
-COPY milestones/milestoneOne/modelTesting/data ./data
+COPY planning/Milestone1/modelTesting/data ./data
 RUN useradd --uid 10001 --create-home appuser \
     && mkdir -p /state \
     && chown appuser:appuser /state

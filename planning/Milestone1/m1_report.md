@@ -90,31 +90,33 @@ The selected model's learned SVD parameters were not changed for this service. T
 
 # 3: Containerization and deployment
 
-Our inference service runs on the team's Ubuntu 24.04 VM in a Python 3.12 Docker container. Gunicorn serves Flask on port 8082. Request-handling logic loads the trained SVD model once, ranks unseen movies for known users, and returns up to 20 comma-separated movie IDs. Users with cached LLM profiles receive content-based rankings; unknown users receive a popularity fallback and enter a profiling queue. Model files are mounted read-only; profiles and queued jobs persist in a Docker volume backed by SQLite.
+Our Python 3.12 inference service runs in Docker on the team's Ubuntu VM, deployed over SSH from `/home/the-neural-network`. Gunicorn serves Flask on port 8082. Request logic selects SVD ranking for known users, content ranking for saved LLM profiles, or popularity while a profile is pending. The model loads once from a read-only mount; SQLite profiles and jobs persist in a named Docker volume.
 
-## Architecture question: 
-**How does a recommendation request reach the model, and where does cold-start processing occur?**  
-Solid arrows show the deployed service; dashed arrows show prepared, inactive live profiling.
+**Architecture question: which components answer requests, and which prepare cold-start profiles?** Solid arrows are verified serving paths; dashed arrows are implemented live paths awaiting verification.
 
 ```mermaid
 flowchart LR
-    Client[Client] -->|HTTP :8082| API[Flask request handling]
-    subgraph VM[Team VM / Docker Compose]
-        API --> Model[Model: loaded SVD factors]
-        API --> Cold[Cold-start logic: content ranking or fallback]
-        Cold --> DB[(SQLite profiles and queue)]
-        Worker[Background LLM worker] -.-> DB
+    Client -->|HTTP :8082| API[Flask request logic]
+    subgraph VM[VM / Docker Compose]
+        API --> Model[Model: SVD factors]
+        API --> Cold[Cold-start ranking / fallback]
+        Cold --> Features[Model: cached text features]
+        API --> DB[(Profiles and job queue)]
+        Cold --> DB
+        KafkaWorker[Kafka consumer] -.-> DB
+        Worker[LLM profile worker] -.-> DB
     end
-    Inputs[Kafka accounts / user API] -.-> Worker
+    Kafka -.-> KafkaWorker
+    Worker -.-> External[User API / OpenAI]
 ```
 
-Deployment uses SSH and repository configuration. Check out `deployment/docker-smoke-test`, provide `artifacts/model.joblib` and `artifacts/llm_profiles.json`, then run `sudo env BIND_ADDRESS=0.0.0.0 docker compose -f compose.smoke.yaml up -d --build --wait`. The [Dockerfile](https://github.com/jwatson8/The-Neural-Network/blob/419e04360686621844fb02a0a93f847abd60f52b/Dockerfile), [Compose configuration](https://github.com/jwatson8/The-Neural-Network/blob/419e04360686621844fb02a0a93f847abd60f52b/compose.smoke.yaml), and [deployment/test instructions](https://github.com/jwatson8/The-Neural-Network/blob/419e04360686621844fb02a0a93f847abd60f52b/deployment/README.md) document reproduction. Six VM smoke checks passed; an external request returned HTTP 200 in 202 ms. These checks do not establish sustained throughput or grading-traffic totals.
+The [Dockerfile](../../Dockerfile) packages the service and recorded data. [Compose](../../compose.yaml) provides a training command and starts the API with `docker compose up -d --wait`; optional live services use `--profile live`. The [deployment guide](../../deployment/README.md) documents configuration, training, staging on port 18082, switching to 8082, and rollback.
 
-## Trade-off
-A single VM and Compose keep deployment simple and reproducible, but provide no host redundancy and accept a brief interruption during container replacement.
+On the VM, training and six HTTP smoke checks passed. The integrated service returned HTTP 200 externally in 273 ms. OpenAI authentication also succeeded; this does not verify profile generation or course traffic.
 
-## Current limitation:
-The [live-worker configuration and activation instructions](https://github.com/jwatson8/The-Neural-Network/blob/419e04360686621844fb02a0a93f847abd60f52b/deployment/LIVE_SETUP.md) are prepared, but automatic new-user profiling and Kafka verification await course connection details and an authorized LLM key. This part of Milestone 1 is not yet verified. Update this paragraph and diagram after activation.
+**Trade-off:** one VM and Compose simplify operation but provide no host redundancy; replacing containers accepts a brief interruption.
+
+**Remaining verification:** enable the live services with course connection settings, demonstrate a new user's LLM profile and personalized response, and verify the required Kafka request counts. These steps are not yet confirmed.
 
 # 4: Meeting Notes and Team Contract
 

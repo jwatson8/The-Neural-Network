@@ -10,7 +10,7 @@ import joblib
 from src.model.recommender import fit, load_data
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATA = ROOT / 'milestones/milestoneOne/modelTesting/data'
+DEFAULT_DATA = ROOT / 'planning/Milestone1/modelTesting/data'
 
 
 def prepare(data_dir, model_path, download=False):

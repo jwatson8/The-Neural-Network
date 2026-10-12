@@ -10,4 +10,4 @@ state
 **/__pycache__
 src/app/data
 src/app/fullTrainedModel
-milestones/milestoneOne/modelTesting/full_models
+planning/Milestone1/modelTesting/full_models
