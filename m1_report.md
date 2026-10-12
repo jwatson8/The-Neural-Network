@@ -1,13 +1,13 @@
 # 1: Model Comparison
 Our models were evaluated according to numerous qualities. For the purpose of this report, we will focus on 4-qualities:
 1) Training time,
-2) Throughput 
+2) Inference latency, 
 3) Model size
-4) Reccomendation Quality
+4) Recommendation Quality
 
 To see more data and graphical representations of evaluations, see `./modelTesting/results/graphs`. To see the code used for evaluation, see `./modelTesting/train_all.py`, `./modelTesting/inference_tests.py`, `./modelTesting/throughput.py`. 
 
-Origional milestone models can be found here:  
+Milestone Zero models can be found here:  
 [Jace's Milestone Zero](https://github.com/jwatson8/S3D17645_Movie_Recommendation)  
 [Frank's Milestone Zero](https://github.com/franktsai127/ml-m0-recommender)  
 [Alvajoy's Milestone Zero](https://github.com/AlvajoyAsante/SWE-AI-CMU/tree/main/ML%20in%20Production/Milestone%200)  
@@ -16,7 +16,7 @@ Origional milestone models can be found here:
 Models had to be slightly modified to fit the demands of this testing regiment. Specifications can be found in `./modelTesting/NOTES.md`, changes to model-training found in folders bearing the name of each group member.
 
 ## Training Time
-![Graphic representation of model differenc in training time](./modelTesting/results/graphs/average_training_time.png)
+![Graphic representation of model differenc in training time](./planning/Milestone1/modelTesting/results/graphs/average_training_time.png)
 ### Metric
 Average time of training and loading on the same dataset.
 ### Data
@@ -30,39 +30,39 @@ Split the `events.csv.gz` dataset according to an `80/20` split (80% of data for
     Nathan: 1460ms
 
 ## Inference Latency
-![Graphic representation of model differenc in model inference time](./modelTesting/results/graphs/average_top20_request_time.png)
+![Graphic representation of model differenc in model inference time](./planning/Milestone1/modelTesting/results/graphs/average_top20_request_time.png)
 ### Metric
-Average time, per request, to generate K-20 reccomendations for a given user.
+Average time, per request, to generate K-20 recommendations for a given user.
 ### Data
 Use the trained models and the holdout test data described above in *Training Times*.
 ### Operationalization
-The model's prediction capacity is restricted to "warm" items (e.g., movies that exist in the training data). Go through the testing data and exclude any movie that doesn't appear at least once in the training data (this is also important because Jace's model uses the full movie catalog metadata for scoring, so this "evens" the playing field). Run performance tests before and after the model makes a prediction and record the difference. Run the test 100 times and take the average. Report ms per requrest.
+The model's prediction capacity is restricted to "warm" items (e.g., movies that exist in the training data). Go through the testing data and exclude any movie that doesn't appear at least once in the training data (this is also important because Jace's model uses the full movie catalog metadata for scoring, so this "evens" the playing field). Run performance tests before and after the model makes a prediction and record the difference. Run the test 100 times and take the average. Report ms per request.
 ### Results
     Jace: 3.589ms
     Frank: 1.136ms
     Alvajoy: 5.074ms
     Nathan: 5.985ms
 ## Model Size
-![Graphic representation of model differenc in terms of model size](./modelTesting/results/graphs/model_artifact_size.png)
+![Graphic representation of model differenc in terms of model size](./planning/Milestone1/modelTesting/results/graphs/model_artifact_size.png)
 ### Metric
 Size of the saved, exported model.
 ### Data
-Use the train models as described above in *Training Times*.
+Use the train models as described above in *Training Times*. You can train them using `train_all.py`.
 ### Operationalization
-Inspect the size of each model and graph them. Report as MB.
+Inspect the size of each model and graph them. The artifacts will be found in `models`. They are titled `alvajoy_model.joblib`, `frank_model.joblib`, `jace_model.joblib`, and `nathan_model.keras`. Report as MB.
 ### Results
     Jace: 4.304 mb
     Frank: 31.269 mb
     Alvajoy: 2.969 mb
     Nathan: 1.239 mb
-## Reccomendation Quality
-![Graphic representation of model differenc in reccomendation quality, specifically hitrate@20](./modelTesting/results/graphs/native_recall_at_20.png)
+## Recommendation Quality
+![Graphic representation of model differenc in recommendation quality, specifically hitrate@20](./planning/Milestone1/modelTesting/results/graphs/native_recall_at_20.png)
 ### Metric
 Recall (@20)
 ### Data
 Use the models as described above in *Training Times*, and operationalize the testdata as described in *Throughput*
 ### Operationalization
-To calculate the value, for each model obtain a k-20 listing for the user. Ensure that the no movies already-seen by the user are included in the k-20 reccomendation. Go through the test data and find every movie in the test data for that user that scored above a baseline (x > 7.5). That comprises total-known relevent movies. Now, find the intersection between total known relevent moves and the k-20 model reccomendation for that user. the ratio of the two is recall @ 20. This is essentially recall (TP / TP + FN). Now calculate the average of these reccomendations accross every user in the dataset and calculate the mean. Do this for every model. Calculate against a baseline model (reccomend the top rated moves in the movie-dataset)
+To calculate the value, for each model obtain a k-20 listing for the user. Ensure that the no movies already-seen by the user are included in the k-20 recommendation. Go through the test data and find every movie in the test data for that user that scored above a baseline (x > 7.5). That comprises total-known relevent movies. Now, find the intersection between total known relevent moves and the k-20 model recommendation for that user. the ratio of the two is recall @ 20. This is essentially recall (TP / TP + FN). Now calculate the average of these recommendations accross every user in the dataset and calculate the mean. Do this for every model. Calculate against a baseline model (reccomend the top rated moves in the movie-dataset)
 ### Results
     Baseline: .1%
     Jace: 16%
@@ -71,22 +71,26 @@ To calculate the value, for each model obtain a k-20 listing for the user. Ensur
     Nathan: 9.2%
 ## Final Selection and Rationale
 ### Jace's Model
-Ultimately, we concluded that Jace's model was the best. It stuck a balance between size, throughput, and training-time while having the most desireable reccomendation quality according to recall@20. In other metrics not discussed here, Jace's model scored similarly top-tier.
+Ultimately, we concluded that Jace's model was the best. It stuck a balance between size, throughput, and training-time while having the most desireable recommendation quality according to recall@20. In other metrics not discussed here, Jace's model scored similarly top-tier.
 
 # 2: Prediction Service
 The Flask API loads the selected Jace model bundle at startup (by default, `src/app/fullTrainedModel/jace_model.joblib`; deployments can override this with `MODEL_PATH`). `GET /recommend/<user_id>` returns up to 20 movie IDs as one comma-separated `text/plain` response. If the model is unavailable, the API returns HTTP 503.
 
-The model is loaded once when the service starts so requests can use it without re-reading the artifact. The `/health` endpoint reports whether the model and profile store are ready. The recommendation route records the selected route, model version, response time, and status in its log output.
+The model serving code can be found in [api.py](./src/service/api.py). The model is loaded once when the service starts so requests can use it without re-reading the artifact. The `/health` endpoint reports whether the model and profile store are ready. The recommendation route records the selected route, model version, response time, and status in its log output.
 
-For a user with interaction history, the serving adapter scores every movie by the dot product of that user's learned SVD factors and the movie factors. It removes movies already seen by the user, orders the remaining scores from high to low, and returns the first 20 distinct IDs. This is a ranking score, not a predicted star rating. The factors are learned by 32-component TruncatedSVD over the user/movie interaction matrix; explicit ratings overwrite watch-only values.
+For a user with interaction history, the serving adapter [(here)](./src/service/model_adapter.py) scores every movie by the dot product of that user's learned SVD factors and the movie factors. It removes movies already seen by the user, orders the remaining scores from high to low, and returns the first 20 distinct IDs. This is a ranking score, not a predicted star rating. The factors are learned by 32-component TruncatedSVD over the user/movie interaction matrix; explicit ratings overwrite watch-only values.
 
 The SVD model represents users and movies as vectors in a shared latent space. A larger dot product indicates a stronger match according to the patterns in the training interactions. The service sorts these scores to produce an ordered list; it does not convert them into calibrated ratings or a probability that a user will like a movie.
 
 Filtering seen movies prevents the endpoint from returning items the user has already watched or rated. The final list is capped at 20 IDs, which keeps the response compact for the consuming application.
 
-For a new user without interaction history, the cold-start process (`src/service/cold_start.py`) asks an LLM to create a personalized SVD "fingerprint" from the user's profile and stated preferences, such as genres and types of movies they enjoy or avoid. The fingerprint is intended to represent those preferences in the same latent space as the model's movie factors. The service can then score candidate movies by comparing the new user's fingerprint with each movie factor, while filtering out any movies they have already seen. This makes it possible to personalize recommendations before the user has built up an interaction history. The fingerprint is generated asynchronously. One change we made to the origional Jace model was the 'default' fallback. Since communication with the LLM exceeds the 600ms timeframe needed for user experience, the user receives highly-ranked and popular movies in the interim while the LLM helps populate their fingerprint.
+For a new user without interaction history, the cold-start process [cold_start.py](./src/service/cold_start.py) asks an LLM to create a personalized SVD "fingerprint" from the user's profile and stated preferences, such as genres and types of movies they enjoy or avoid. The fingerprint is intended to represent those preferences in the same latent space as the model's movie factors. The service can then score candidate movies by comparing the new user's fingerprint with each movie factor, while filtering out any movies they have already seen. This makes it possible to personalize recommendations before the user has built up an interaction history. The fingerprint is generated asynchronously. 
+
+One change we made to the original Jace model was the 'default' fallback. Since communication with the LLM exceeds the 600ms timeframe needed for user experience, the user receives highly-ranked and popular movies in the interim while the LLM helps populate their fingerprint.
 
 The selected model's learned SVD parameters were not changed for this service. The planned extension retains the trained movie factors and uses each new user's profile and preferences to create a compatible user-specific fingerprint. The existing dot-product ranking can then be reused for that user. The fingerprint generation and storage steps are service additions; they do not require retraining the shared model for every new account.
+
+Some current operational challenges are that profile creation is not verified, and the current implimentation does not have a way to retrain the model based on mounting user interactions.
 
 # 3: Containerization and deployment
 
@@ -122,6 +126,8 @@ On the VM, training and six HTTP smoke checks passed. The integrated service ret
 
 ## Meeting Note
 - [Meeting Notes](https://docs.google.com/document/d/1KkiqGav8hNbT_1qaAIR9rnov3ghDki5VzYoF1GzO2R4/edit?tab=t.68e54dbq2yxa)
+- [Project Board](https://github.com/users/jwatson8/projects/1).  
+- [Issues](https://github.com/jwatson8/The-Neural-Network/issues).
 
 ## Communication Norms and Expectations
 
