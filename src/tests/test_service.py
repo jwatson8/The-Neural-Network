@@ -1,6 +1,7 @@
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
@@ -39,9 +40,10 @@ class Vectorizer:
 
 def make_model():
     movies = [{'movie_id': f'movie-{index}'} for index in range(22)]
-    content = np.zeros((len(movies), 2))
+    content = np.zeros((len(movies), 3))
     content[1, 0] = 1
     content[2, 1] = 1
+    content[3, 2] = 1
     factors = np.zeros((2, len(movies)))
     factors[0] = np.arange(len(movies), 0, -1)
     popularity = np.arange(len(movies), dtype=float)
@@ -96,7 +98,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertLess(elapsed, 0.6)
 
-    def test_new_database_user_gets_database_backed_cold_start(self):
+    def test_raw_description_does_not_skip_llm_queue(self):
         with self.store.connect() as connection:
             connection.execute('''
                 INSERT INTO users (user_id, self_description_likes, self_description_dislikes)
@@ -113,8 +115,8 @@ class ServiceTests(unittest.TestCase):
         response = self.client.get('/recommend/cold-user')
         ids = response.get_data(as_text=True).split(',')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(ids[0], 'action-db')
-        self.assertIn('drama-db', ids)
+        self.assertNotIn('action-db', ids)
+        self.assertEqual(self.store.claim_next()['user_id'], 'cold-user')
 
     def test_saved_profile_personalizes_user_without_database_account(self):
         with self.store.connect() as connection:
@@ -127,7 +129,9 @@ class ServiceTests(unittest.TestCase):
         response = self.client.get('/recommend/profile-user')
         ids = response.get_data(as_text=True).split(',')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(ids[0], 'profile-db')
+        self.assertEqual(ids[0], 'movie-3')
+        self.assertNotIn('profile-db', ids)
+        self.assertIsNone(self.store.claim_next())
 
     def test_health_requires_model_and_profile_store(self):
         response = self.client.get('/health')
@@ -135,7 +139,9 @@ class ServiceTests(unittest.TestCase):
 
     def test_initialization_populates_dataset_tables_idempotently(self):
         expected_counts = {'events': 54704, 'movies': 2569, 'users': 1050}
-        self.store.initialize()
+        with patch.dict('os.environ', {'SEED_DATASETS': '1'}):
+            self.store.initialize()
+            self.store.initialize()
         with self.store.connect() as connection:
             counts = {
                 table: connection.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]

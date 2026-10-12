@@ -6,7 +6,7 @@ import numpy as np
 def validate_model(model):
     required = {
         'movies', 'ui', 'seen', 'user_factors', 'movie_factors', 'vectorizer',
-        'popularity',
+        'popularity', 'content',
     }
     missing = required.difference(model)
     if missing:
@@ -15,6 +15,8 @@ def validate_model(model):
         raise ValueError('Movie catalog and popularity scores have different lengths')
     if model['movie_factors'].shape[1] != len(model['movies']):
         raise ValueError('Movie factors do not match the catalog')
+    if hasattr(model['content'], 'shape') and model['content'].shape[0] != len(model['movies']):
+        raise ValueError('Content features do not match the catalog')
 
 
 def recommend(model, user_id, k=20):

@@ -1,0 +1,13 @@
+.git
+.venv
+__pycache__
+*.py[cod]
+.env
+.env.*
+!.env.example
+artifacts
+state
+**/__pycache__
+src/app/data
+src/app/fullTrainedModel
+milestones/milestoneOne/modelTesting/full_models
