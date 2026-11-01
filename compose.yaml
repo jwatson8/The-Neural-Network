@@ -10,6 +10,30 @@ x-service: &service
     options: {max-size: "10m", max-file: "3"}
 
 services:
+  database:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-recommender}
+      POSTGRES_USER: ${POSTGRES_USER:-recommender}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recommender}
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  database-init:
+    <<: *service
+    restart: "no"
+    command: [python, -m, src.database.initialize]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-recommender}:${POSTGRES_PASSWORD:-recommender}@database:5432/${POSTGRES_DB:-recommender}
+    depends_on:
+      database: {condition: service_healthy}
+
   train:
     <<: *service
     profiles: [tools]
@@ -87,6 +111,7 @@ services:
       api: {condition: service_healthy}
 
 volumes:
+  postgres-data:
   profiles:
     # Reuse the original VM smoke deployment's persistent profiles by default.
     name: ${PROFILE_VOLUME_NAME:-neural-network-smoke_smoke-profiles}
