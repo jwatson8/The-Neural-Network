@@ -7,6 +7,11 @@ from uuid import UUID, uuid4
 
 from sqlmodel import Session
 
+from src.database.interactions._pagination import (
+    SearchCursor,
+    SearchPage,
+    search_records,
+)
 from src.database.interactions._shared import (
     create_record,
     dialect_insert,
@@ -19,7 +24,7 @@ from src.database.interactions._shared import (
 from src.database.models import StreamEvent
 from src.database.schemas import StreamEventCreate
 
-__all__ = ["create", "get", "list_records", "create_many"]
+__all__ = ["create", "get", "list_records", "create_many", "search"]
 
 
 ### ----------- Helper Functions -----------
@@ -35,6 +40,47 @@ def _get(session: Session, event_id: UUID) -> StreamEvent | None:
 
 def _list(session: Session, *, offset: int, limit: int) -> list[StreamEvent]:
     return list_model_records(session, StreamEvent, offset=offset, limit=limit)
+
+
+def _search(
+    session: Session,
+    *,
+    start: datetime | None,
+    end: datetime | None,
+    time_basis: Literal["event_time", "stored_at"],
+    user_id: str | None,
+    event_type: Literal["watch", "rating", "account_created"] | None,
+    movie_id: str | None,
+    cursor: SearchCursor | None,
+    limit: int,
+) -> SearchPage[StreamEvent]:
+    timestamp_columns = {
+        "event_time": StreamEvent.event_time,
+        "stored_at": StreamEvent.stored_at,
+    }
+    if time_basis not in timestamp_columns:
+        raise ValueError("time_basis must be event_time or stored_at")
+    timestamp_column = timestamp_columns[time_basis]
+    conditions = []
+    for column, value in (
+        (StreamEvent.user_id, user_id),
+        (StreamEvent.event_type, event_type),
+        (StreamEvent.movie_id, movie_id),
+    ):
+        if value is not None:
+            conditions.append(column == value)
+    return search_records(
+        session,
+        StreamEvent,
+        timestamp_column=timestamp_column,
+        id_column=StreamEvent.event_id,
+        scope=f"stream_events:{time_basis}",
+        conditions=conditions,
+        start=start,
+        end=end,
+        cursor=cursor,
+        limit=limit,
+    )
 
 
 def _create_many(session: Session, records: list[StreamEventCreate]) -> int:
@@ -101,3 +147,30 @@ def create_many(records: Iterable[StreamEventCreate | Mapping[str, object]]) -> 
     """Insert a validated event batch atomically, skipping duplicate event UUIDs."""
     validated = [StreamEventCreate.model_validate(record) for record in records]
     return run(lambda session: _create_many(session, validated))
+
+
+def search(
+    *,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    time_basis: Literal["event_time", "stored_at"] = "event_time",
+    user_id: str | None = None,
+    event_type: Literal["watch", "rating", "account_created"] | None = None,
+    movie_id: str | None = None,
+    cursor: SearchCursor | None = None,
+    limit: int = 100,
+) -> SearchPage[StreamEvent]:
+    """Search events newest-first by occurrence time or database storage time."""
+    return run(
+        lambda session: _search(
+            session,
+            start=start,
+            end=end,
+            time_basis=time_basis,
+            user_id=user_id,
+            event_type=event_type,
+            movie_id=movie_id,
+            cursor=cursor,
+            limit=limit,
+        )
+    )

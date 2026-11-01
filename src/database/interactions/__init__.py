@@ -1,8 +1,8 @@
-"""The supported teammate-facing database API.
+"""The supported import-facing database API.
 
 Import the module matching the table you need; public calls validate their named
 inputs, open and commit a transaction, and return readable records::
-
+EX:
     from src.database.interactions import stream_events, users
     user = users.create(user_id="42", age=31)
     stream_events.create(
@@ -15,10 +15,11 @@ inputs, open and commit a transaction, and return readable records::
 Use ``create_many`` for immutable event batches and ``create_missing_many`` when
 loading users or movies without replacing records already present. Derived current
 state, such as user/movie history, exposes explicit upsert operations. Append-only
-modules expose no update operation. Functions prefixed with an underscore are
-private transaction implementations and must not be imported by application code.
-Validation errors describe bad inputs, database integrity errors describe constraint
-violations, and ``RecordNotFoundError`` identifies updates of missing records.
+modules expose no update operation and provide cursor-based ``search`` functions
+for bounded offline reads. Functions prefixed with an underscore are private
+transaction implementations and must not be imported by application code. Validation
+errors describe bad inputs, database integrity errors describe constraint violations,
+and ``RecordNotFoundError`` identifies updates of missing records.
 """
 
 from src.database.interactions import (
@@ -31,10 +32,13 @@ from src.database.interactions import (
     user_movie_history,
     users,
 )
+from src.database.interactions._pagination import SearchCursor, SearchPage
 from src.database.interactions._shared import RecordNotFoundError
 
 __all__ = [
     "RecordNotFoundError",
+    "SearchCursor",
+    "SearchPage",
     "cold_start_jobs",
     "cold_start_profiles",
     "llm_usage",

@@ -3,7 +3,7 @@ import inspect
 import os
 import tempfile
 import unittest
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -113,6 +113,175 @@ class DatabaseInteractionTests(unittest.TestCase):
                 event_time=self.now,
                 rating=None,
             )
+
+    def test_audit_searches_filter_time_and_fields(self):
+        self.seed_catalog()
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+
+        matching_usage = llm_usage.create(
+            user_id="user-1",
+            occurred_at=start,
+            provider="openai",
+            model_name="model-a",
+            status="succeeded",
+        )
+        llm_usage.create(
+            user_id="user-1",
+            occurred_at=start + timedelta(hours=1),
+            provider="openai",
+            model_name="model-a",
+            status="failed",
+        )
+        llm_usage.create(
+            occurred_at=start + timedelta(hours=2),
+            provider="other",
+            model_name="model-b",
+            status="succeeded",
+        )
+
+        matching_serve = recommendation_serves.create(
+            user_id="user-1",
+            request_received_at=start,
+            served_at=start + timedelta(seconds=1),
+            serve_duration_ms=1000,
+            model_route="llm_content",
+            model_version="m1",
+            recommendations=[{"movie_id": "movie-1"}],
+        )
+        recommendation_serves.create(
+            user_id="user-1",
+            request_received_at=start + timedelta(hours=1),
+            served_at=start + timedelta(hours=1, seconds=1),
+            serve_duration_ms=1000,
+            model_route="collaborative_svd",
+            model_version="m2",
+            recommendations=[{"movie_id": "movie-1"}],
+        )
+
+        usage_page = llm_usage.search(
+            start=start.astimezone(timezone(timedelta(hours=-6))),
+            end=start + timedelta(hours=2),
+            user_id="user-1",
+            provider="openai",
+            model_name="model-a",
+            status="succeeded",
+        )
+        serve_page = recommendation_serves.search(
+            start=start,
+            end=start + timedelta(hours=2),
+            user_id="user-1",
+            model_route="llm_content",
+            model_version="m1",
+        )
+
+        self.assertEqual(
+            [record.request_id for record in usage_page.records],
+            [matching_usage.request_id],
+        )
+        self.assertIsNone(usage_page.next_cursor)
+        self.assertEqual(
+            [record.request_id for record in serve_page.records],
+            [matching_serve.request_id],
+        )
+
+    def test_stream_event_search_uses_cursor_and_selected_time_basis(self):
+        self.seed_catalog()
+        event_day = datetime(2026, 1, 1, tzinfo=UTC)
+        storage_day = event_day + timedelta(days=1)
+        events = [
+            stream_events.create(
+                user_id="user-1",
+                movie_id="movie-1",
+                event_type="watch",
+                event_time=event_day,
+            ),
+            stream_events.create(
+                user_id="user-1",
+                movie_id="movie-1",
+                event_type="rating",
+                event_time=event_day + timedelta(hours=1),
+                rating=8,
+            ),
+            stream_events.create(
+                user_id="user-1",
+                event_type="account_created",
+                event_time=event_day + timedelta(hours=2),
+            ),
+        ]
+        with Session(self.engine) as session:
+            for index, event in enumerate(events):
+                stored_event = session.get(StreamEvent, event.event_id)
+                stored_event.stored_at = storage_day + timedelta(hours=index)
+                session.add(stored_event)
+            session.commit()
+
+        seen_ids = []
+        cursor = None
+        while True:
+            page = stream_events.search(
+                start=event_day,
+                end=event_day + timedelta(days=1),
+                user_id="user-1",
+                cursor=cursor,
+                limit=1,
+            )
+            seen_ids.extend(record.event_id for record in page.records)
+            cursor = page.next_cursor
+            if cursor is None:
+                break
+
+        watch_page = stream_events.search(
+            start=event_day,
+            end=event_day + timedelta(days=1),
+            event_type="watch",
+            movie_id="movie-1",
+        )
+        stored_page = stream_events.search(
+            start=storage_day,
+            end=storage_day + timedelta(days=1),
+            time_basis="stored_at",
+        )
+        prior_storage_page = stream_events.search(
+            start=event_day,
+            end=storage_day,
+            time_basis="stored_at",
+        )
+
+        self.assertEqual(seen_ids, [event.event_id for event in reversed(events)])
+        self.assertEqual(
+            [record.event_id for record in watch_page.records], [events[0].event_id]
+        )
+        self.assertEqual(
+            [record.event_id for record in stored_page.records],
+            [event.event_id for event in reversed(events)],
+        )
+        self.assertEqual(prior_storage_page.records, [])
+
+    def test_audit_searches_reject_invalid_windows_limits_and_cursors(self):
+        self.seed_catalog()
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+        for hour in range(2):
+            stream_events.create(
+                user_id="user-1",
+                movie_id="movie-1",
+                event_type="watch",
+                event_time=start + timedelta(hours=hour),
+            )
+
+        event_page = stream_events.search(limit=1)
+        self.assertIsNotNone(event_page.next_cursor)
+        with self.assertRaisesRegex(ValueError, "start must include a timezone"):
+            llm_usage.search(start=start.replace(tzinfo=None))
+        with self.assertRaisesRegex(ValueError, "end must be later than start"):
+            recommendation_serves.search(start=start, end=start)
+        with self.assertRaisesRegex(ValueError, "limit must be between"):
+            stream_events.search(limit=0)
+        with self.assertRaisesRegex(ValueError, "limit must be between"):
+            stream_events.search(limit=1001)
+        with self.assertRaisesRegex(ValueError, "time_basis must be"):
+            stream_events.search(time_basis="invalid")
+        with self.assertRaisesRegex(ValueError, "Cursor scope must be"):
+            llm_usage.search(cursor=event_page.next_cursor)
 
     def test_create_missing_batches_preserve_existing_records(self):
         self.seed_catalog()

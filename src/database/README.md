@@ -1,8 +1,13 @@
-# Recommendation database
+# Database
 
-The public API is organized by table and owns its transactions. Teammates pass
-normal Python values; each function validates them through `schemas.py`, commits,
-and returns a loaded record:
+The database is organized by table and table-specific interactions. There are 6 
+    
+
+Code is modular, so pass
+normal Python values, and each function validates them through `schemas.py`, commits,
+and then returns either a loaded record or the missing data.
+
+For example:
 
 ```python
 from src.database.interactions import stream_events, users
@@ -16,7 +21,7 @@ event = stream_events.create(
 )
 ```
 
-A cleaner can return a dictionary and unpack it into the relevant function:
+Ideal use case, is we should normalize data and then unpack it into the relevant function, e.g.:
 
 ```python
 normalized_user = {"user_id": "42", "age": 31}
@@ -42,6 +47,36 @@ from src.database.interactions import stream_events
 normalized_events = [normalize_message(message) for message in kafka_batch]
 inserted_count = stream_events.create_many(normalized_events)
 ```
+
+Immutable interaction records can be searched in bounded pages. For a daily
+incremental job, use the stream event storage time so late activity enters the
+next storage-day batch while retaining its original `event_time`:
+
+```python
+from datetime import UTC, datetime
+
+start = datetime(2026, 11, 1, tzinfo=UTC)
+end = datetime(2026, 11, 2, tzinfo=UTC)
+cursor = None
+
+while True:
+    page = stream_events.search(
+        start=start,
+        end=end,
+        time_basis="stored_at",
+        cursor=cursor,
+        limit=1000,
+    )
+    process(page.records)
+    if page.next_cursor is None:
+        break
+    cursor = page.next_cursor
+```
+
+LLM usage and recommendation serves provide the same cursor pattern using their
+occurrence and serve timestamps. Search boundaries must include a timezone; the
+start is inclusive and the end is exclusive. Reuse the same window and filters when
+passing a cursor to the next search call.
 
 Updates raise a named error when the target does not exist. Validation and database
 constraint errors remain distinct so callers can choose whether to reject, retry,
@@ -84,9 +119,9 @@ docker compose --profile tools run --rm database-roll-up
 
 The command accepts `--data-dir` and `--chunk-size` when run directly.
 
-## Run and administer PostgreSQL
+## Running in Production
 
-Copy `.env.example` to `.env`, set `POSTGRES_PASSWORD`, then run:
+In `.env`, set `POSTGRES_PASSWORD` to be a secure password, then run:
 
 ```sh
 docker compose up -d database database-init
