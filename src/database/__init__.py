@@ -1,5 +1,7 @@
-"""PostgreSQL persistence package for recommendation data."""
+"""PostgreSQL persistence package for recommendation data.
 
-from src.database.database import get_session, session_scope
+Application code should import table APIs from ``src.database.interactions``.
+Engine and session helpers are infrastructure details used inside this package.
+"""
 
-__all__ = ["get_session", "session_scope"]
+__all__: list[str] = []

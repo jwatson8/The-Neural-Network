@@ -1,26 +1,38 @@
 """SQLModel engine, pooling, and session lifecycle configuration."""
 
 import os
-from collections.abc import Generator, Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from functools import lru_cache
 
-from sqlalchemy import Engine, text
+from sqlalchemy import URL, Engine, text
 from sqlmodel import Session, create_engine
 
-DEFAULT_DATABASE_URL = (
-    "postgresql+psycopg://recommender:recommender@database:5432/recommender"
-)
+
+def get_database_url() -> str | URL:
+    if database_url := os.getenv("DATABASE_URL"):
+        return database_url
+    password = os.getenv("DATABASE_PASSWORD")
+    if not password:
+        raise RuntimeError("Set DATABASE_PASSWORD or DATABASE_URL")
+    return URL.create(
+        "postgresql+psycopg",
+        username=os.getenv("DATABASE_USER", "recommender"),
+        password=password,
+        host=os.getenv("DATABASE_HOST", "database"),
+        port=int(os.getenv("DATABASE_PORT", "5432")),
+        database=os.getenv("DATABASE_NAME", "recommender"),
+    )
 
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
-    database_url = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    database_url = get_database_url()
     engine_options: dict[str, object] = {
         "echo": os.getenv("DATABASE_ECHO", "false").lower() == "true",
         "pool_pre_ping": True,
     }
-    if not database_url.startswith("sqlite"):
+    if not str(database_url).startswith("sqlite"):
         engine_options.update(
             pool_size=int(os.getenv("DATABASE_POOL_SIZE", "5")),
             max_overflow=int(os.getenv("DATABASE_MAX_OVERFLOW", "10")),
@@ -32,14 +44,14 @@ def get_engine() -> Engine:
 
 def get_session() -> Generator[Session, None, None]:
     """Yield a session for dependency-injection frameworks."""
-    with Session(get_engine()) as session:
+    with Session(get_engine(), expire_on_commit=False) as session:
         yield session
 
 
 @contextmanager
-def session_scope() -> Iterator[Session]:
+def session_scope() -> Generator[Session, None, None]:
     """Provide a transaction that commits on success and rolls back on error."""
-    with Session(get_engine()) as session:
+    with Session(get_engine(), expire_on_commit=False) as session:
         try:
             yield session
             session.commit()

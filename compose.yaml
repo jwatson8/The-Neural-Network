@@ -9,30 +9,48 @@ x-service: &service
     driver: json-file
     options: {max-size: "10m", max-file: "3"}
 
+x-database-connection: &database-connection
+  DATABASE_HOST: database
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: ${POSTGRES_DB:-recommender}
+  DATABASE_USER: ${POSTGRES_USER:-recommender}
+  DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+
 services:
   database:
     image: postgres:17-bookworm
     restart: unless-stopped
+    shm_size: 128mb
+    stop_grace_period: 30s
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-recommender}
       POSTGRES_USER: ${POSTGRES_USER:-recommender}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recommender}
-    ports: ["${POSTGRES_PORT:-5432}:5432"]
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    expose: ["5432"]
     volumes: [postgres-data:/var/lib/postgresql/data]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 10s
 
   database-init:
     <<: *service
     restart: "no"
     command: [python, -m, src.database.initialize]
-    environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-recommender}:${POSTGRES_PASSWORD:-recommender}@database:5432/${POSTGRES_DB:-recommender}
+    environment: *database-connection
     depends_on:
       database: {condition: service_healthy}
+
+  database-roll-up:
+    <<: *service
+    profiles: [tools]
+    restart: "no"
+    command: [python, -m, src.database.roll_up, --data-dir, /app/data]
+    environment: *database-connection
+    depends_on:
+      database-init: {condition: service_completed_successfully}
 
   train:
     <<: *service

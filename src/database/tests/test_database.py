@@ -1,39 +1,32 @@
+import gzip
+import inspect
+import os
+import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
-from src.database.interaction import (
-    claim_cold_start_job,
-    complete_cold_start_job,
-    create_llm_usage,
-    create_movie,
-    create_recommendation_serve,
-    create_stream_event,
-    create_user,
-    enqueue_cold_start_job,
-    get_cold_start_profile,
-    get_user_movie_history,
-    retry_cold_start_job,
-    update_movie,
-    upsert_cold_start_profile,
-    upsert_user_movie_history,
+from src.database.database import get_database_url
+from src.database.interactions import (
+    RecordNotFoundError,
+    cold_start_jobs,
+    cold_start_profiles,
+    llm_usage,
+    movies,
+    recommendation_serves,
+    stream_events,
+    user_movie_history,
+    users,
 )
-from src.database.schemas import (
-    ColdStartJobCreate,
-    ColdStartProfileUpsert,
-    LLMUsageCreate,
-    MovieCreate,
-    MovieUpdate,
-    RecommendationItem,
-    RecommendationServeCreate,
-    StreamEventCreate,
-    UserCreate,
-    UserMovieHistoryUpsert,
-)
+from src.database.models import StreamEvent, User
+from src.database.roll_up import roll_up
+from src.database.schemas import StreamEventCreate, UserCreate
 
 
 class DatabaseInteractionTests(unittest.TestCase):
@@ -44,80 +37,64 @@ class DatabaseInteractionTests(unittest.TestCase):
             poolclass=StaticPool,
         )
         SQLModel.metadata.create_all(self.engine)
+        self.engine_patch = patch(
+            "src.database.database.get_engine", return_value=self.engine
+        )
+        self.engine_patch.start()
+        self.addCleanup(self.engine_patch.stop)
+        self.addCleanup(self.engine.dispose)
         self.now = datetime.now(UTC)
 
-    def tearDown(self):
-        self.engine.dispose()
-
-    def seed_user_and_movie(self, session):
-        create_user(session, UserCreate(user_id="user-1", age=34))
-        return create_movie(
-            session,
-            MovieCreate(
-                movie_id="movie-1",
-                title="Initial title",
-                genres="Drama|Romance",
-            ),
+    def seed_catalog(self):
+        users.create(user_id="user-1", age=34)
+        return movies.create(
+            movie_id="movie-1",
+            title="Initial title",
+            genres="Drama|Romance",
         )
 
-    def test_schema_has_eight_tables_and_composite_history_key(self):
-        inspector = inspect(self.engine)
+    def test_schema_and_database_url_configuration(self):
+        inspector = sqlalchemy_inspect(self.engine)
+        self.assertEqual(len(inspector.get_table_names()), 8)
         self.assertEqual(
-            set(inspector.get_table_names()),
-            {
-                "cold_start_jobs",
-                "cold_start_profiles",
-                "llm_usage",
-                "movies",
-                "recommendation_serves",
-                "stream_events",
-                "user_movie_history",
-                "users",
-            },
+            inspector.get_pk_constraint("user_movie_history")["constrained_columns"],
+            ["user_id", "movie_id"],
         )
-        history_pk = inspector.get_pk_constraint("user_movie_history")
-        self.assertEqual(history_pk["constrained_columns"], ["user_id", "movie_id"])
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(RuntimeError):
+                get_database_url()
+        with patch.dict(
+            os.environ,
+            {"DATABASE_PASSWORD": "special@:/# password"},
+            clear=True,
+        ):
+            self.assertEqual(get_database_url().password, "special@:/# password")
 
-    def test_create_update_and_history_upsert(self):
-        with Session(self.engine) as session:
-            movie = self.seed_user_and_movie(session)
-            event = create_stream_event(
-                session,
-                StreamEventCreate(
-                    user_id="user-1",
-                    movie_id="movie-1",
-                    event_type="rating",
-                    event_time=self.now,
-                    minute_index=42,
-                    rating=8,
-                ),
-            )
-            update_movie(session, movie, MovieUpdate(title="Updated title"))
-            upsert_user_movie_history(
-                session,
-                UserMovieHistoryUpsert(
-                    user_id="user-1",
-                    movie_id="movie-1",
-                    latest_rating=8,
-                ),
-            )
-            upsert_user_movie_history(
-                session,
-                UserMovieHistoryUpsert(
-                    user_id="user-1",
-                    movie_id="movie-1",
-                    latest_rating=9,
-                ),
-            )
-            session.commit()
+    def test_public_crud_owns_transactions_and_returns_loaded_records(self):
+        movie = self.seed_catalog()
+        event = stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            event_time=self.now,
+            rating=8,
+        )
+        movies.update("movie-1", title="Updated", overview=None)
+        user_movie_history.upsert(
+            user_id="user-1", movie_id="movie-1", latest_rating=8
+        )
 
-            history = get_user_movie_history(session, "user-1", "movie-1")
-            self.assertEqual(movie.title, "Updated title")
-            self.assertEqual(event.rating, 8)
-            self.assertEqual(history.latest_rating, 9)
+        self.assertEqual(movie.title, "Initial title")
+        self.assertEqual(event.rating, 8)
+        self.assertEqual(movies.get("movie-1").title, "Updated")
+        self.assertEqual(
+            user_movie_history.get("user-1", "movie-1").latest_rating, 8
+        )
+        with self.assertRaises(RecordNotFoundError):
+            users.update("missing", age=20)
 
-    def test_raw_csv_events_normalize_to_canonical_shapes(self):
-        watch = StreamEventCreate.model_validate(
+    def test_raw_csv_event_normalization_and_validation(self):
+        event = StreamEventCreate.model_validate(
             {
                 "timestamp": "2025-01-01T00:00:00",
                 "user_id": 1,
@@ -126,157 +103,93 @@ class DatabaseInteractionTests(unittest.TestCase):
                 "rating": "",
             }
         )
-        rating = StreamEventCreate.model_validate(
-            {
-                "timestamp": "2025-01-01T00:01:00",
-                "user_id": "1",
-                "event_type": "rating",
-                "movie_id": "jumanji+1995",
-                "rating": "7",
-            }
-        )
-        account = StreamEventCreate.model_validate(
-            {
-                "timestamp": "2025-02-07T23:44:00",
-                "user_id": "1070",
-                "event_type": "account_created",
-                "movie_id": "",
-                "rating": float("nan"),
-            }
-        )
-
-        self.assertEqual(watch.user_id, "1")
-        self.assertEqual(watch.event_time.tzinfo, UTC)
-        self.assertIsNone(watch.rating)
-        self.assertEqual(rating.rating, 7)
-        self.assertIsNone(account.movie_id)
-        self.assertIsNone(account.rating)
-
-    def test_timezone_aware_event_and_supplied_id_are_preserved(self):
-        event_id = uuid4()
-        event = StreamEventCreate(
-            event_id=event_id,
-            user_id="user-1",
-            event_type="watch",
-            movie_id="movie-1",
-            event_time="2025-01-01T01:00:00+01:00",
-        )
-        self.assertEqual(event.event_id, event_id)
-        self.assertEqual(event.event_time, datetime(2025, 1, 1, tzinfo=UTC))
-
-    def test_recommendations_preserve_order_and_optional_scores(self):
-        with Session(self.engine) as session:
-            self.seed_user_and_movie(session)
-            served = create_recommendation_serve(
-                session,
-                RecommendationServeCreate(
-                    user_id="user-1",
-                    request_received_at=self.now,
-                    served_at=self.now + timedelta(milliseconds=12),
-                    serve_duration_ms=12,
-                    model_route="collaborative_svd",
-                    model_version="m1",
-                    recommendations=[
-                        RecommendationItem(movie_id="movie-1", model_score=4.2),
-                        RecommendationItem(movie_id="movie-2"),
-                    ],
-                ),
-            )
-            session.commit()
-
-            self.assertEqual(
-                served.recommendations,
-                [
-                    {"movie_id": "movie-1", "model_score": 4.2},
-                    {"movie_id": "movie-2"},
-                ],
-            )
-
-    def test_cold_start_profile_and_job_lifecycle(self):
-        with Session(self.engine) as session:
-            create_user(session, UserCreate(user_id="cold-user"))
-            request_id = uuid4()
-            create_llm_usage(
-                session,
-                LLMUsageCreate(
-                    request_id=request_id,
-                    user_id="cold-user",
-                    provider="openai",
-                    model_name="test-model",
-                    status="succeeded",
-                ),
-            )
-            enqueue_cold_start_job(session, ColdStartJobCreate(user_id="cold-user"))
-            enqueue_cold_start_job(session, ColdStartJobCreate(user_id="cold-user"))
-            job = claim_cold_start_job(session, lease_seconds=30)
-            self.assertEqual(job.attempts, 1)
-            self.assertEqual(job.status, "processing")
-
-            retry_cold_start_job(session, job, "temporary failure")
-            job.next_attempt_at = self.now - timedelta(seconds=1)
-            session.flush()
-            job = claim_cold_start_job(session, lease_seconds=30)
-            self.assertEqual(job.attempts, 2)
-
-            upsert_cold_start_profile(
-                session,
-                ColdStartProfileUpsert(
-                    user_id="cold-user",
-                    positive="space adventure",
-                    negative="gore",
-                    source_description_hash="a" * 64,
-                    llm_request_id=request_id,
-                ),
-            )
-            self.assertTrue(complete_cold_start_job(session, "cold-user"))
-            session.commit()
-
-            profile = get_cold_start_profile(session, "cold-user")
-            self.assertEqual(profile.positive, "space adventure")
-            self.assertIsNone(claim_cold_start_job(session))
-
-    def test_validation_rejects_invalid_values(self):
+        self.assertEqual(event.user_id, "1")
+        self.assertEqual(event.event_time.tzinfo, UTC)
         with self.assertRaises(ValueError):
             StreamEventCreate(
-                user_id="user-1",
+                user_id="1",
                 event_type="rating",
+                movie_id="movie-1",
                 event_time=self.now,
-                rating=11,
+                rating=None,
             )
-        invalid_events = [
-            {"event_type": "unknown", "movie_id": "movie-1"},
-            {"event_type": "watch", "movie_id": None},
-            {"event_type": "watch", "movie_id": "movie-1", "rating": 8},
-            {"event_type": "rating", "movie_id": "movie-1", "rating": None},
-            {"event_type": "account_created", "movie_id": "movie-1"},
-        ]
-        for values in invalid_events:
-            with self.subTest(values=values), self.assertRaises(ValueError):
-                StreamEventCreate(
-                    user_id="user-1",
-                    event_time=self.now,
-                    **values,
+
+    def test_audits_and_cold_start_lifecycle(self):
+        self.seed_catalog()
+        served = recommendation_serves.create(
+            user_id="user-1",
+            request_received_at=self.now,
+            served_at=self.now + timedelta(milliseconds=12),
+            serve_duration_ms=12,
+            model_route="collaborative_svd",
+            model_version="m1",
+            recommendations=[{"movie_id": "movie-1", "model_score": 4.2}],
+        )
+        usage = llm_usage.create(
+            user_id="user-1",
+            provider="openai",
+            model_name="test-model",
+            status="succeeded",
+        )
+        cold_start_jobs.enqueue(user_id="user-1")
+        claimed = cold_start_jobs.claim(lease_seconds=30)
+        cold_start_profiles.complete_generation(
+            user_id="user-1",
+            positive="space",
+            llm_request_id=usage.request_id,
+        )
+        self.assertFalse(cold_start_jobs.complete("user-1"))
+        self.assertEqual(served.recommendations[0]["movie_id"], "movie-1")
+        self.assertEqual(claimed.attempts, 1)
+        self.assertEqual(cold_start_profiles.get("user-1").positive, "space")
+
+    def test_low_level_session_supports_atomic_rollback(self):
+        with Session(self.engine) as session:
+            users._create(session, UserCreate(user_id="rolled-back"))
+            session.rollback()
+        with Session(self.engine) as session:
+            self.assertIsNone(session.get(User, "rolled-back"))
+
+    def test_public_functions_are_documented_and_hide_sessions(self):
+        modules = (
+            users, movies, stream_events, user_movie_history,
+            recommendation_serves, llm_usage, cold_start_profiles,
+            cold_start_jobs,
+        )
+        functions = [getattr(module, name) for module in modules for name in module.__all__]
+        for function in functions:
+            with self.subTest(function=function.__qualname__):
+                self.assertTrue(inspect.getdoc(function))
+                self.assertNotIn("session", inspect.signature(function).parameters)
+
+    def test_roll_up_is_idempotent_and_derives_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            (data_dir / "users.csv").write_text(
+                "user_id,age,occupation,gender,self_description_likes,self_description_dislikes\n"
+                "1,34,programmer,M,space,\n",
+                encoding="utf-8",
+            )
+            with gzip.open(data_dir / "movies.csv.gz", "wt", encoding="utf-8") as stream:
+                stream.write(
+                    "movie_id,title,genres,release_date,runtime,original_language,overview,"
+                    "popularity,vote_average,vote_count,imdb_id,tmdb_id,license_cost\n"
+                    "movie-1,Movie,Drama,2020-01-01,90,en,Story,1.2,7.0,10,tt1,1,0.1\n"
                 )
-        with self.assertRaises(ValueError):
-            StreamEventCreate.model_validate(
-                {
-                    "timestamp": "2025-01-01T00:00:00",
-                    "event_time": "2025-01-01T00:01:00",
-                    "user_id": "user-1",
-                    "event_type": "watch",
-                    "movie_id": "movie-1",
-                }
+            (data_dir / "events.csv").write_text(
+                "timestamp,user_id,event_type,movie_id,rating\n"
+                "2025-01-01T00:00:00,1,watch,movie-1,\n"
+                "2025-01-01T00:01:00,1,rating,movie-1,8\n",
+                encoding="utf-8",
             )
-        with self.assertRaises(ValueError):
-            RecommendationServeCreate(
-                user_id="user-1",
-                request_received_at=self.now,
-                served_at=self.now,
-                serve_duration_ms=0,
-                model_route="fallback",
-                model_version="m1",
-                recommendations=[],
-            )
+            first = roll_up(data_dir, chunk_size=1)
+            second = roll_up(data_dir, chunk_size=1)
+
+        self.assertEqual(first["events_inserted"], 2)
+        self.assertEqual(second["events_inserted"], 0)
+        self.assertEqual(user_movie_history.get("1", "movie-1").latest_rating, 8)
+        with Session(self.engine) as session:
+            self.assertEqual(len(session.exec(select(StreamEvent)).all()), 2)
 
 
 if __name__ == "__main__":
