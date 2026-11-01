@@ -65,6 +65,47 @@ def upsert_record(
     return record
 
 
+def create_missing_records(
+    session: Session,
+    model_type: type[SQLModel],
+    records: list[SQLModel],
+    key_field: str,
+    *,
+    batch_size: int = 1000,
+) -> list[str]:
+    """Insert absent records in chunks and return conflict-skipped keys."""
+    keys = [getattr(record, key_field) for record in records]
+    seen_keys = set()
+    reported_duplicate_keys = set()
+    duplicate_keys = []
+    for key in keys:
+        if key in seen_keys and key not in reported_duplicate_keys:
+            duplicate_keys.append(key)
+            reported_duplicate_keys.add(key)
+        seen_keys.add(key)
+    if duplicate_keys:
+        formatted_keys = ", ".join(str(key) for key in duplicate_keys)
+        raise ValueError(f"Duplicate {key_field} values: {formatted_keys}")
+
+    inserted_keys = set()
+    key_column = getattr(model_type, key_field)
+    for start in range(0, len(records), batch_size):
+        chunk = records[start : start + batch_size]
+        values = [
+            model_type.model_validate(schema_values(record)).model_dump()
+            for record in chunk
+        ]
+        statement = dialect_insert(session, model_type).values(values)
+        result = session.execute(
+            statement.on_conflict_do_nothing(index_elements=[key_field]).returning(
+                key_column
+            )
+        )
+        inserted_keys.update(result.scalars().all())
+    session.flush()
+    return [key for key in keys if key not in inserted_keys]
+
+
 def create_record(
     session: Session, model_type: type[Result], values: dict[str, Any]
 ) -> Result:

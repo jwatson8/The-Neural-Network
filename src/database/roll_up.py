@@ -49,8 +49,8 @@ def _event_id(row_number: int, row: dict[str, str]):
     return uuid5(NAMESPACE_URL, identity)
 
 
-def roll_up(data_dir: Path, *, chunk_size: int = 1000) -> dict[str, int]:
-    """Upsert one complete snapshot and return processed row counts by table."""
+def roll_up(data_dir: Path, *, chunk_size: int = 1000) -> dict[str, object]:
+    """Load one snapshot without replacing existing source records."""
     if chunk_size < 1:
         raise ValueError("chunk_size must be positive")
 
@@ -80,8 +80,8 @@ def roll_up(data_dir: Path, *, chunk_size: int = 1000) -> dict[str, int]:
         }
         for row in _rows(_source_path(data_dir, "movies"))
     ]
-    users.upsert_many(user_rows)
-    movies.upsert_many(movie_rows)
+    skipped_user_ids = users.create_missing_many(user_rows)
+    skipped_movie_ids = movies.create_missing_many(movie_rows)
 
     event_rows = []
     history: dict[tuple[str, str], dict[str, object]] = {}
@@ -108,8 +108,14 @@ def roll_up(data_dir: Path, *, chunk_size: int = 1000) -> dict[str, int]:
         user_movie_history.upsert_many(chunk)
 
     return {
-        "users": len(user_rows),
-        "movies": len(movie_rows),
+        "users": {
+            "created": len(user_rows) - len(skipped_user_ids),
+            "skipped_ids": skipped_user_ids,
+        },
+        "movies": {
+            "created": len(movie_rows) - len(skipped_movie_ids),
+            "skipped_ids": skipped_movie_ids,
+        },
         "events_inserted": inserted_events,
         "history": len(history),
     }

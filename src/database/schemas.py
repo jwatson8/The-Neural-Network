@@ -152,7 +152,7 @@ class LLMUsageCreate(DatabaseSchema):
     status: str = Field(min_length=1, max_length=50)
 
 
-class ColdStartProfileUpsert(DatabaseSchema):
+class ColdStartProfileReplace(DatabaseSchema):
     user_id: str = Field(min_length=1, max_length=255)
     positive: str = ""
     negative: str = ""

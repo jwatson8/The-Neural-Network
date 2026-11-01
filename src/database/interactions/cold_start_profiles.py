@@ -15,12 +15,14 @@ from src.database.interactions._shared import (
     upsert_record,
 )
 from src.database.models import ColdStartProfile, utc_now
-from src.database.schemas import ColdStartProfileUpsert
+from src.database.schemas import ColdStartProfileReplace
 
-__all__ = ["upsert", "get", "list_records", "complete_generation"]
+__all__ = ["replace", "get", "list_records", "complete_generation"]
+
+### ----------- Helper Functions -----------
 
 
-def _upsert(session: Session, data: ColdStartProfileUpsert) -> ColdStartProfile:
+def _replace(session: Session, data: ColdStartProfileReplace) -> ColdStartProfile:
     values = schema_values(data)
     values.setdefault("generated_at", utc_now())
     values["updated_at"] = utc_now()
@@ -48,7 +50,10 @@ def _list(session: Session, *, offset: int, limit: int) -> list[ColdStartProfile
     return list_model_records(session, ColdStartProfile, offset=offset, limit=limit)
 
 
-def upsert(
+### ----------- Individual Functions -----------
+
+
+def replace(
     *,
     user_id: str,
     positive: str = "",
@@ -62,13 +67,16 @@ def upsert(
     Positive/negative text drives cold-start ranking. The optional 64-character
     source hash detects stale descriptions, and ``llm_request_id`` links usage.
     """
-    data = ColdStartProfileUpsert(**locals())
-    return run(lambda session: _upsert(session, data))
+    data = ColdStartProfileReplace(**locals())
+    return run(lambda session: _replace(session, data))
 
 
 def get(user_id: str) -> ColdStartProfile | None:
     """Return the user's generated cold-start profile, or ``None``."""
     return run(lambda session: _get(session, user_id))
+
+
+### ----------- Batch Functions -----------
 
 
 def list_records(*, offset: int = 0, limit: int = 100) -> list[ColdStartProfile]:
@@ -88,12 +96,12 @@ def complete_generation(
     """Atomically save a generated profile and remove its pending queue job.
 
     Use this after successful LLM generation so a crash cannot leave a saved
-    profile and stale job in separate transactions. Profile fields match ``upsert``.
+    profile and stale job in separate transactions. Profile fields match ``replace``.
     """
-    data = ColdStartProfileUpsert(**locals())
+    data = ColdStartProfileReplace(**locals())
 
     def operation(session):
-        profile = _upsert(session, data)
+        profile = _replace(session, data)
         cold_start_jobs._complete(session, user_id)
         return profile
 

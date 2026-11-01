@@ -114,6 +114,56 @@ class DatabaseInteractionTests(unittest.TestCase):
                 rating=None,
             )
 
+    def test_create_missing_batches_preserve_existing_records(self):
+        self.seed_catalog()
+
+        skipped_user_ids = users.create_missing_many(
+            [
+                {"user_id": "user-1", "age": 99},
+                {"user_id": "user-2", "age": 20},
+            ]
+        )
+        skipped_movie_ids = movies.create_missing_many(
+            [
+                {"movie_id": "movie-1", "title": "Replacement title"},
+                {"movie_id": "movie-2", "title": "New title"},
+            ]
+        )
+
+        self.assertEqual(skipped_user_ids, ["user-1"])
+        self.assertEqual(skipped_movie_ids, ["movie-1"])
+        self.assertEqual(users.get("user-1").age, 34)
+        self.assertEqual(users.get("user-2").age, 20)
+        self.assertEqual(movies.get("movie-1").title, "Initial title")
+        self.assertEqual(movies.get("movie-2").title, "New title")
+        self.assertEqual(users.create_missing_many([]), [])
+
+    def test_create_missing_batches_reject_invalid_or_duplicate_ids_atomically(self):
+        with self.assertRaisesRegex(ValueError, "Duplicate user_id values: duplicate"):
+            users.create_missing_many(
+                [
+                    {"user_id": "new-user"},
+                    {"user_id": "duplicate"},
+                    {"user_id": "duplicate"},
+                ]
+            )
+        self.assertIsNone(users.get("new-user"))
+
+        with self.assertRaises(ValueError):
+            users.create_missing_many(
+                [{"user_id": "valid-user"}, {"user_id": "", "age": -1}]
+            )
+        self.assertIsNone(users.get("valid-user"))
+
+    def test_create_missing_batches_insert_in_chunks(self):
+        records = [{"user_id": f"bulk-{index}"} for index in range(1001)]
+
+        self.assertEqual(users.create_missing_many(records), [])
+        self.assertEqual(
+            users.create_missing_many(records),
+            [record["user_id"] for record in records],
+        )
+
     def test_audits_and_cold_start_lifecycle(self):
         self.seed_catalog()
         served = recommendation_serves.create(
@@ -138,10 +188,11 @@ class DatabaseInteractionTests(unittest.TestCase):
             positive="space",
             llm_request_id=usage.request_id,
         )
+        cold_start_profiles.replace(user_id="user-1", positive="mystery")
         self.assertFalse(cold_start_jobs.complete("user-1"))
         self.assertEqual(served.recommendations[0]["movie_id"], "movie-1")
         self.assertEqual(claimed.attempts, 1)
-        self.assertEqual(cold_start_profiles.get("user-1").positive, "space")
+        self.assertEqual(cold_start_profiles.get("user-1").positive, "mystery")
 
     def test_low_level_session_supports_atomic_rollback(self):
         with Session(self.engine) as session:
@@ -185,6 +236,14 @@ class DatabaseInteractionTests(unittest.TestCase):
             first = roll_up(data_dir, chunk_size=1)
             second = roll_up(data_dir, chunk_size=1)
 
+        self.assertEqual(first["users"], {"created": 1, "skipped_ids": []})
+        self.assertEqual(first["movies"], {"created": 1, "skipped_ids": []})
+        self.assertEqual(
+            second["users"], {"created": 0, "skipped_ids": ["1"]}
+        )
+        self.assertEqual(
+            second["movies"], {"created": 0, "skipped_ids": ["movie-1"]}
+        )
         self.assertEqual(first["events_inserted"], 2)
         self.assertEqual(second["events_inserted"], 0)
         self.assertEqual(user_movie_history.get("1", "movie-1").latest_rating, 8)

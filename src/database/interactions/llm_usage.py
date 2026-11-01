@@ -19,6 +19,8 @@ from src.database.schemas import LLMUsageCreate
 
 __all__ = ["create", "get", "list_records"]
 
+### ----------- Helper Functions -----------
+
 
 def _create(session: Session, data: LLMUsageCreate) -> LLMUsage:
     return create_record(session, LLMUsage, schema_values(data))
@@ -30,6 +32,9 @@ def _get(session: Session, request_id: UUID) -> LLMUsage | None:
 
 def _list(session: Session, *, offset: int, limit: int) -> list[LLMUsage]:
     return list_model_records(session, LLMUsage, offset=offset, limit=limit)
+
+
+### ----------- Individual Functions -----------
 
 
 def create(
@@ -56,6 +61,9 @@ def create(
 def get(request_id: UUID) -> LLMUsage | None:
     """Return the LLM usage audit identified by ``request_id``, or ``None``."""
     return run(lambda session: _get(session, request_id))
+
+
+### ----------- Batch Functions -----------
 
 
 def list_records(*, offset: int = 0, limit: int = 100) -> list[LLMUsage]:

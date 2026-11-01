@@ -18,6 +18,8 @@ from src.database.schemas import RecommendationItem, RecommendationServeCreate
 
 __all__ = ["create", "get", "list_records"]
 
+### ----------- Helper Functions -----------
+
 
 def _create(session: Session, data: RecommendationServeCreate) -> RecommendationServe:
     return create_record(session, RecommendationServe, schema_values(data))
@@ -29,6 +31,9 @@ def _get(session: Session, request_id: UUID) -> RecommendationServe | None:
 
 def _list(session: Session, *, offset: int, limit: int) -> list[RecommendationServe]:
     return list_model_records(session, RecommendationServe, offset=offset, limit=limit)
+
+
+### ----------- Individual Functions -----------
 
 
 def create(
@@ -55,6 +60,9 @@ def create(
 def get(request_id: UUID) -> RecommendationServe | None:
     """Return the serve audit identified by ``request_id``, or ``None``."""
     return run(lambda session: _get(session, request_id))
+
+
+### ----------- Batch Functions -----------
 
 
 def list_records(*, offset: int = 0, limit: int = 100) -> list[RecommendationServe]:

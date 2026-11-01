@@ -22,6 +22,9 @@ from src.database.schemas import StreamEventCreate
 __all__ = ["create", "get", "list_records", "create_many"]
 
 
+### ----------- Helper Functions -----------
+
+
 def _create(session: Session, data: StreamEventCreate) -> StreamEvent:
     return create_record(session, StreamEvent, schema_values(data))
 
@@ -48,6 +51,9 @@ def _create_many(session: Session, records: list[StreamEventCreate]) -> int:
     )
     session.flush()
     return len(result.scalars().all())
+
+
+### ----------- Individual Functions -----------
 
 
 def create(
@@ -81,6 +87,9 @@ def create(
 def get(event_id: UUID) -> StreamEvent | None:
     """Return the immutable event identified by ``event_id``, or ``None``."""
     return run(lambda session: _get(session, event_id))
+
+
+### ----------- Batch Functions -----------
 
 
 def list_records(*, offset: int = 0, limit: int = 100) -> list[StreamEvent]:

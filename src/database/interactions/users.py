@@ -9,12 +9,12 @@ from src.database.interactions._shared import (
     UNSET,
     RecordNotFoundError,
     UnsetType,
+    create_missing_records,
     create_record,
     run,
     schema_values,
     supplied,
     update_record,
-    upsert_record,
 )
 from src.database.interactions._shared import (
     list_records as list_model_records,
@@ -22,9 +22,10 @@ from src.database.interactions._shared import (
 from src.database.models import User
 from src.database.schemas import UserCreate, UserUpdate
 
-__all__ = ["create", "get", "update", "list_records", "upsert_many"]
+__all__ = ["create", "get", "update", "list_records", "create_missing_many"]
 
 
+### ----------- Helper Functions -----------
 def _create(session: Session, data: UserCreate) -> User:
     return create_record(session, User, schema_values(data))
 
@@ -41,19 +42,11 @@ def _list(session: Session, *, offset: int, limit: int) -> list[User]:
     return list_model_records(session, User, offset=offset, limit=limit)
 
 
-def _upsert_many(session: Session, records: list[UserCreate]) -> int:
-    fields = (
-        "age",
-        "occupation",
-        "gender",
-        "self_description_likes",
-        "self_description_dislikes",
-    )
-    for data in records:
-        upsert_record(session, User, schema_values(data), ("user_id",), fields)
-    return len(records)
+def _create_missing_many(session: Session, records: list[UserCreate]) -> list[str]:
+    return create_missing_records(session, User, records, "user_id")
 
 
+### ----------- Individual Functions -----------
 def create(
     *,
     user_id: str,
@@ -64,7 +57,7 @@ def create(
     self_description_likes: str | None = None,
     self_description_dislikes: str | None = None,
 ) -> User:
-    """Create and commit a user.
+    """Create and commit a user. All params must be supplied by name, e.g.: 'user_id = '42')
 
     Args:
         user_id: Stable external user identifier.
@@ -83,7 +76,7 @@ def create(
 
 
 def get(user_id: str) -> User | None:
-    """Return the user identified by ``user_id``, or ``None`` when absent."""
+    """Return the user database information identified by ``user_id``, or ``None`` when absent."""
     return run(lambda session: _get(session, user_id))
 
 
@@ -96,7 +89,18 @@ def update(
     self_description_likes: str | None | UnsetType = UNSET,
     self_description_dislikes: str | None | UnsetType = UNSET,
 ) -> User:
-    """Update supplied fields; omit a field to preserve it or pass ``None`` to clear it."""
+    """Update supplied fields; omit a field to preserve it or pass ``None`` to clear it. Params, except user_id, must be suppleid by name.
+    Args:
+        user_id: Stable external user identifier. String.
+        first_seen: First observation time.
+        age: Non-negative age, when known.
+        occupation: Source occupation label, when known.
+        gender: Source gender value, when known.
+        self_description_likes: Free-text movie preferences.
+        self_description_dislikes: Free-text movie dislikes.
+    Returns:
+        The updated user record, readable after this function returns.
+    """
     changes = UserUpdate(
         **supplied(
             age=age,
@@ -116,12 +120,17 @@ def update(
     return run(operation)
 
 
+### ----------- Batch Functions -----------
+
+
 def list_records(*, offset: int = 0, limit: int = 100) -> list[User]:
     """Return users using zero-based ``offset`` and a maximum ``limit`` of 1,000."""
     return run(lambda session: _list(session, offset=offset, limit=limit))
 
 
-def upsert_many(records: Iterable[UserCreate | Mapping[str, object]]) -> int:
-    """Insert or update a normalized user batch in one transaction; return row count."""
+def create_missing_many(
+    records: Iterable[UserCreate | Mapping[str, object]],
+) -> list[str]:
+    """Insert absent users atomically and return IDs left unchanged."""
     validated = [UserCreate.model_validate(record) for record in records]
-    return run(lambda session: _upsert_many(session, validated))
+    return run(lambda session: _create_missing_many(session, validated))

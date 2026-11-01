@@ -18,6 +18,8 @@ from src.database.schemas import UserMovieHistoryUpsert
 
 __all__ = ["upsert", "get", "list_records", "upsert_many"]
 
+### ----------- Helper Functions -----------
+
 
 def _upsert(session: Session, data: UserMovieHistoryUpsert) -> UserMovieHistory:
     values = schema_values(data)
@@ -45,6 +47,9 @@ def _upsert_many(session: Session, records: list[UserMovieHistoryUpsert]) -> int
     return len(records)
 
 
+### ----------- Individual Functions -----------
+
+
 def upsert(
     *,
     user_id: str,
@@ -69,6 +74,9 @@ def get(user_id: str, movie_id: str) -> UserMovieHistory | None:
 def list_records(*, offset: int = 0, limit: int = 100) -> list[UserMovieHistory]:
     """Return history rows using zero-based ``offset`` and capped ``limit``."""
     return run(lambda session: _list(session, offset=offset, limit=limit))
+
+
+### ----------- Batch Functions -----------
 
 
 def upsert_many(

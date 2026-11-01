@@ -10,12 +10,12 @@ from src.database.interactions._shared import (
     UNSET,
     RecordNotFoundError,
     UnsetType,
+    create_missing_records,
     create_record,
     run,
     schema_values,
     supplied,
     update_record,
-    upsert_record,
 )
 from src.database.interactions._shared import (
     list_records as list_model_records,
@@ -23,11 +23,9 @@ from src.database.interactions._shared import (
 from src.database.models import Movie
 from src.database.schemas import MovieCreate, MovieUpdate
 
-__all__ = ["create", "get", "update", "list_records", "upsert_many"]
+__all__ = ["create", "get", "update", "list_records", "create_missing_many"]
 
-MOVIE_UPDATE_FIELDS = tuple(
-    field for field in MovieCreate.model_fields if field != "movie_id"
-)
+### ----------- Helper Functions -----------
 
 
 def _create(session: Session, data: MovieCreate) -> Movie:
@@ -46,12 +44,11 @@ def _list(session: Session, *, offset: int, limit: int) -> list[Movie]:
     return list_model_records(session, Movie, offset=offset, limit=limit)
 
 
-def _upsert_many(session: Session, records: list[MovieCreate]) -> int:
-    for data in records:
-        upsert_record(
-            session, Movie, schema_values(data), ("movie_id",), MOVIE_UPDATE_FIELDS
-        )
-    return len(records)
+def _create_missing_many(session: Session, records: list[MovieCreate]) -> list[str]:
+    return create_missing_records(session, Movie, records, "movie_id")
+
+
+### ----------- Individual Functions -----------
 
 
 def create(
@@ -142,12 +139,17 @@ def update(
     return run(operation)
 
 
+### ----------- Batch Functions -----------
+
+
 def list_records(*, offset: int = 0, limit: int = 100) -> list[Movie]:
     """Return movies using zero-based ``offset`` and a maximum ``limit`` of 1,000."""
     return run(lambda session: _list(session, offset=offset, limit=limit))
 
 
-def upsert_many(records: Iterable[MovieCreate | Mapping[str, object]]) -> int:
-    """Insert or update a normalized movie batch in one transaction; return row count."""
+def create_missing_many(
+    records: Iterable[MovieCreate | Mapping[str, object]],
+) -> list[str]:
+    """Insert absent movies atomically and return IDs left unchanged."""
     validated = [MovieCreate.model_validate(record) for record in records]
-    return run(lambda session: _upsert_many(session, validated))
+    return run(lambda session: _create_missing_many(session, validated))

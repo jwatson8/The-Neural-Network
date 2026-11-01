@@ -12,12 +12,13 @@ inputs, open and commit a transaction, and return readable records::
         event_time="2025-01-01T00:00:00Z",
     )
 
-Use ``create_many``/``upsert_many`` for a normalized Kafka or backfill batch.
-Append-only modules expose no update operation. Functions prefixed with an
-underscore are private transaction implementations and must not be imported by
-application code. Validation errors describe bad inputs, database integrity errors
-describe constraint violations, and ``RecordNotFoundError`` identifies updates of
-missing records.
+Use ``create_many`` for immutable event batches and ``create_missing_many`` when
+loading users or movies without replacing records already present. Derived current
+state, such as user/movie history, exposes explicit upsert operations. Append-only
+modules expose no update operation. Functions prefixed with an underscore are
+private transaction implementations and must not be imported by application code.
+Validation errors describe bad inputs, database integrity errors describe constraint
+violations, and ``RecordNotFoundError`` identifies updates of missing records.
 """
 
 from src.database.interactions import (

@@ -23,6 +23,16 @@ normalized_user = {"user_id": "42", "age": 31}
 users.create(**normalized_user)
 ```
 
+For a normalized user or movie batch, insert only missing source records and
+inspect IDs that were deliberately left unchanged:
+
+```python
+skipped_user_ids = users.create_missing_many(normalized_users)
+```
+
+Invalid or duplicate input fails the whole batch. Existing records are returned in
+input order and must be changed through the explicit `update()` operation.
+
 For a Kafka poll batch, normalize each message to the canonical event fields and
 write the batch in one transaction. Deterministic event UUIDs make replay safe:
 
@@ -63,8 +73,10 @@ recoverable failure, and `cold_start_profiles.complete_generation()` after succe
 The last operation saves the profile and removes the queue job atomically.
 
 `roll_up.py` is exclusively for the initial users, movies, and events snapshot. It
-also derives `user_movie_history`, uses deterministic event IDs, and is safe to
-rerun. Live services and Kafka consumers must use the interaction API instead.
+inserts missing users and movies without replacing existing source data, derives
+`user_movie_history`, uses deterministic event IDs, and is safe to rerun. Its JSON
+report includes created counts and skipped IDs. Live services and Kafka consumers
+must use the interaction API instead.
 
 ```sh
 docker compose --profile tools run --rm database-roll-up

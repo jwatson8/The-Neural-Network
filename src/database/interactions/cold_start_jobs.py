@@ -17,6 +17,8 @@ from src.database.schemas import ColdStartJobCreate
 
 __all__ = ["enqueue", "claim", "retry", "complete"]
 
+### ----------- Helper Functions -----------
+
 
 def _enqueue(session: Session, data: ColdStartJobCreate) -> ColdStartJob:
     values = schema_values(data)
@@ -35,7 +37,12 @@ def _claim(session: Session, *, lease_seconds: int) -> ColdStartJob | None:
         select(ColdStartJob)
         .where(
             ColdStartJob.next_attempt_at <= now,
-            or_(ColdStartJob.status == "pending", and_(ColdStartJob.status == "processing", ColdStartJob.lease_until <= now)),
+            or_(
+                ColdStartJob.status == "pending",
+                and_(
+                    ColdStartJob.status == "processing", ColdStartJob.lease_until <= now
+                ),
+            ),
         )
         .order_by(ColdStartJob.created_at)
         .limit(1)
@@ -55,7 +62,9 @@ def _claim(session: Session, *, lease_seconds: int) -> ColdStartJob | None:
     return job
 
 
-def _retry(session: Session, job: ColdStartJob, error: str, *, max_delay_seconds: int) -> ColdStartJob:
+def _retry(
+    session: Session, job: ColdStartJob, error: str, *, max_delay_seconds: int
+) -> ColdStartJob:
     now = utc_now()
     delay = min(2 ** min(job.attempts, 10), max_delay_seconds)
     job.status = "pending"
@@ -78,10 +87,17 @@ def _complete(session: Session, user_id: str) -> bool:
     return True
 
 
+### ----------- Individual Functions -----------
+
+
 def enqueue(
-    *, user_id: str, status: Literal["pending", "processing"] = "pending",
-    attempts: int = 0, next_attempt_at: datetime | None = None,
-    lease_until: datetime | None = None, last_error: str | None = None,
+    *,
+    user_id: str,
+    status: Literal["pending", "processing"] = "pending",
+    attempts: int = 0,
+    next_attempt_at: datetime | None = None,
+    lease_until: datetime | None = None,
+    last_error: str | None = None,
 ) -> ColdStartJob:
     """Idempotently enqueue a user for cold-start profile generation.
 
@@ -97,17 +113,15 @@ def claim(*, lease_seconds: int = 60) -> ColdStartJob | None:
     return run(lambda session: _claim(session, lease_seconds=lease_seconds))
 
 
-def retry(
-    *, user_id: str, error: str, max_delay_seconds: int = 900
-) -> ColdStartJob:
+def retry(*, user_id: str, error: str, max_delay_seconds: int = 900) -> ColdStartJob:
     """Release a claimed job and schedule its exponential-backoff retry."""
+
     def operation(session):
         job = session.get(ColdStartJob, user_id)
         if job is None:
             raise RecordNotFoundError(f"Cold-start job not found: {user_id}")
-        return _retry(
-            session, job, error, max_delay_seconds=max_delay_seconds
-        )
+        return _retry(session, job, error, max_delay_seconds=max_delay_seconds)
+
     return run(operation)
 
 
