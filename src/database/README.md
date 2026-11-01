@@ -1,13 +1,24 @@
-# Database
+# Recommendation Database
 
-The database is organized by table and table-specific interactions. There are 6 
-    
+## Tech Stack
 
-Code is modular, so pass
-normal Python values, and each function validates them through `schemas.py`, commits,
-and then returns either a loaded record or the missing data.
+The database uses PostgreSQL, with functionality provided by SQLModel, SQLAlchemy,
+and Psycopg.
 
-For example:
+## Organization
+
+The database is organized by table and table-specific interactions. There are 8 tables:
+
+`stream_events`, `user_movie_history`, `recommendation_serves`, `users`, `llm_usage`, `movies`, `cold_start_jobs`, and `cold_start_profiles`.
+
+Each table has a corresponding module under `src/database/interactions`. Public
+functions validate inputs through `schemas.py`, own their database transaction, and
+commit on success or roll back on failure.
+
+## Using the Interaction API
+
+Import table interaction modules from the central `src.database.interactions`
+package. For example:
 
 ```python
 from src.database.interactions import stream_events, users
@@ -21,36 +32,48 @@ event = stream_events.create(
 )
 ```
 
-Ideal use case, is we should normalize data and then unpack it into the relevant function, e.g.:
+This example assumes the referenced movie already exists in the catalog.
+
+Normalize incoming data, then unpack it into the relevant function:
 
 ```python
 normalized_user = {"user_id": "42", "age": 31}
 users.create(**normalized_user)
 ```
 
-For a normalized user or movie batch, insert only missing source records and
-inspect IDs that were deliberately left unchanged:
+There are also batch operations. For example:
 
 ```python
-skipped_user_ids = users.create_missing_many(normalized_users)
+skipped_user_ids = users.create_missing_many([
+    {"user_id": "42", "age": 31, "occupation": "programmer"},
+    {"user_id": "43", "age": 27, "occupation": "designer"},
+])
 ```
 
-Invalid or duplicate input fails the whole batch. Existing records are returned in
-input order and must be changed through the explicit `update()` operation.
+In this example, `skipped_user_ids` contains IDs that already existed and were left
+unchanged. An empty list means both users were created. Invalid or duplicate input
+fails the entire batch before any records are written.
 
-For a Kafka poll batch, normalize each message to the canonical event fields and
-write the batch in one transaction. Deterministic event UUIDs make replay safe:
+For replay-safe event ingestion, normalize a Kafka poll batch and provide stable
+event UUIDs:
 
 ```python
-from src.database.interactions import stream_events
-
-normalized_events = [normalize_message(message) for message in kafka_batch]
 inserted_count = stream_events.create_many(normalized_events)
 ```
 
-Immutable interaction records can be searched in bounded pages. For a daily
-incremental job, use the stream event storage time so late activity enters the
-next storage-day batch while retaining its original `event_time`:
+The batch is written in one transaction. Duplicate event UUIDs are skipped, and the
+function returns the number of newly inserted events.
+
+## Search Functionality
+
+The append-only tables are `stream_events`, `recommendation_serves`, and
+`llm_usage`.
+
+Immutable interaction records can be searched in bounded pages. One intended use is
+a daily incremental job. In that case, use the stream event storage time so late
+activity enters the next storage-day batch while retaining its original `event_time`.
+
+For example:
 
 ```python
 from datetime import UTC, datetime
@@ -80,7 +103,7 @@ passing a cursor to the next search call.
 
 Updates raise a named error when the target does not exist. Validation and database
 constraint errors remain distinct so callers can choose whether to reject, retry,
-or dead-letter an input:
+or dead-letter an input. Example:
 
 ```python
 from src.database.interactions import RecordNotFoundError, users
@@ -96,16 +119,9 @@ for editor hover help. Application and automation code should import these table
 modules from `src.database.interactions`; it should not import SQLModel tables or
 functions whose names begin with an underscore.
 
-## Transactions and initial data
+## Initial Data Roll Up
 
-Session-aware implementations live as private underscore functions beside each
-public table API. Cross-table transactions are exposed as purpose-specific public
-operations, such as `cold_start_profiles.complete_generation`; teammates should
-never orchestrate sessions themselves.
-
-Queue workers use `cold_start_jobs.claim()` to lease work, `retry()` after a
-recoverable failure, and `cold_start_profiles.complete_generation()` after success.
-The last operation saves the profile and removes the queue job atomically.
+The system requires initial data, which is provided by the existing CSV snapshots.
 
 `roll_up.py` is exclusively for the initial users, movies, and events snapshot. It
 inserts missing users and movies without replacing existing source data, derives
@@ -117,8 +133,6 @@ must use the interaction API instead.
 docker compose --profile tools run --rm database-roll-up
 ```
 
-The command accepts `--data-dir` and `--chunk-size` when run directly.
-
 ## Running in Production
 
 In `.env`, set `POSTGRES_PASSWORD` to be a secure password, then run:
@@ -128,14 +142,20 @@ docker compose up -d database database-init
 docker compose ps
 ```
 
-PostgreSQL is available only on the Compose network. Use the container for a SQL
-shell or logical backup:
+## Tests and Schema Changes
+
+Run the focused database tests with:
 
 ```sh
-docker compose exec database psql -U recommender -d recommender
-docker compose exec -T database pg_dump -U recommender -d recommender > backup.sql
+python -m unittest discover -s src/database/tests -v
 ```
 
-Run focused tests with `python -m unittest discover -s src/database/tests -v`.
-`initialize.py` uses `create_all` only as a pre-production bootstrap; add Alembic
-migrations before production schema evolution.
+`database-init` uses `SQLModel.metadata.create_all()` for development and initial
+bootstrap. Use a migration tool such as Alembic before making production schema
+changes.
+
+## Left to Add
+
+Flask currently uses SQLite for the cold-start workflow. The PostgreSQL
+`cold_start_jobs` and `cold_start_profiles` interactions are implemented but have not
+yet been integrated into the Flask service.
