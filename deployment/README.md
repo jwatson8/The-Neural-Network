@@ -30,10 +30,16 @@ git -c safe.directory=/home/the-neural-network rev-parse HEAD
 mkdir -p artifacts
 cp -n .env.example .env
 chmod 600 .env
+if grep -q '^POSTGRES_PASSWORD=$' .env; then echo 'Set a strong POSTGRES_PASSWORD in .env'; exit 1; fi
 sudo docker compose build api
 ```
 
 The existing `.env` contains private configuration; `cp -n` must not overwrite it.
+Set `POSTGRES_PASSWORD` to a unique value before any Compose command. A URL-safe
+value can be generated with `openssl rand -hex 32`. Compose refuses to start when
+the password is empty. PostgreSQL is not published on a VM port; administer it
+after SSH login with
+`sudo docker compose exec database psql -U recommender -d recommender`.
 For initial training only, before any API uses this model file:
 
 ```sh
@@ -107,6 +113,14 @@ not bypass the LLM. Empty descriptions keep popularity and do not count as
 personalized. Profiles persist through restarts. No retraining/redeployment is
 needed for profile updates, but new interactions require a later retraining pipeline
 before becoming part of SVD history.
+
+Create a logical PostgreSQL backup on the VM without exposing the database port:
+
+```sh
+sudo docker compose exec -T database pg_dump -U recommender -d recommender > "postgres-$(date +%F).sql"
+```
+
+Move backups to protected storage and test restoration before relying on them.
 
 Kafka uses a unique stable consumer group, starts at the latest offset for a NEW
 group, and resumes committed offsets afterward. Do not share a group with another
