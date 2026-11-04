@@ -88,7 +88,12 @@ class StreamEventCreate(DatabaseSchema):
             if value == "" or (isinstance(value, float) and isnan(value)):
                 values[field_name] = None
         if "user_id" in values:
-            values["user_id"] = str(values["user_id"]).strip()
+            user_id = values["user_id"]
+
+            if user_id is None:
+                raise ValueError("user_id cannot be None")
+
+            values["user_id"] = str(user_id).strip()
         if isinstance(values.get("movie_id"), str):
             values["movie_id"] = values["movie_id"].strip() or None
         return values
@@ -102,10 +107,14 @@ class StreamEventCreate(DatabaseSchema):
 
         if self.event_type == "account_created":
             if self.movie_id is not None or self.rating is not None:
-                raise ValueError("account_created events cannot include a movie or rating")
+                raise ValueError(
+                    "account_created events cannot include a movie or rating"
+                )
         elif self.event_type == "watch":
             if self.movie_id is None or self.rating is not None:
-                raise ValueError("watch events require a movie and cannot include a rating")
+                raise ValueError(
+                    "watch events require a movie and cannot include a rating"
+                )
         elif self.movie_id is None or self.rating is None:
             raise ValueError("rating events require a movie and rating")
         return self
@@ -156,7 +165,9 @@ class ColdStartProfileReplace(DatabaseSchema):
     user_id: str = Field(min_length=1, max_length=255)
     positive: str = ""
     negative: str = ""
-    source_description_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    source_description_hash: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
     llm_request_id: UUID | None = None
     generated_at: datetime | None = None
 

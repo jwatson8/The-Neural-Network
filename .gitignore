@@ -10,3 +10,6 @@ artifacts/
 state/
 .env.*
 !.env.example
+.coverage*
+htmlcov/
+coverage.json
