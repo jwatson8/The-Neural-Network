@@ -37,6 +37,7 @@ esac
         docker.write_text('''#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$DEPLOY_DIRECTORY/commands"
 if [[ "${FAIL_START:-}" == yes && "$*" == *"up -d"* ]]; then exit 1; fi
+if [[ "${FAIL_CONFIG:-}" == yes && "$*" == *"run --rm --no-deps"* ]]; then exit 1; fi
 ''')
         git.chmod(0o755)
         docker.chmod(0o755)
@@ -82,3 +83,8 @@ if [[ "${FAIL_START:-}" == yes && "$*" == *"up -d"* ]]; then exit 1; fi
         result = self.run_deploy(live='false')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('--profile live', (self.root / 'commands').read_text())
+
+    def test_missing_live_configuration_does_not_restart_production(self):
+        self.env['FAIL_CONFIG'] = 'yes'
+        self.assertNotEqual(self.run_deploy().returncode, 0)
+        self.assertNotIn('up -d', (self.root / 'commands').read_text())

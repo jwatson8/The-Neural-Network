@@ -59,4 +59,3 @@ Short restart downtime is accepted. A failed update is reported as failed and ma
 ## Milestone 2 scope
 
 This is the infrastructure CI and deliberate code-deployment pipeline. The separate requirement to retrain from **newer production data** and deploy an updated model still needs the team's model-update script; `src.model.prepare` currently enforces the fixed M0 data checksums. Do not claim a real production deployment until the runner is configured and a deployment run passes. Link an actual passing Actions run and its coverage artifact in `m2_report.md`.
-
