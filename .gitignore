@@ -10,3 +10,7 @@ artifacts/
 state/
 .env.*
 !.env.example
+.coverage
+.pytest_cache/
+reports/
+.deployment.lock
