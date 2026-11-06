@@ -47,3 +47,7 @@ and verify fallback-to-profile transitions and persistence with mocked external
 calls. GitHub Actions additionally builds Docker, trains inside it, and exercises
 the actual HTTP endpoint. Neither test suite proves the course endpoints or LLM
 key work; verify those on the VM before claiming full M1 deployment.
+
+## Continuous integration and deployment
+
+See [the CI/CD guide](deployment/CI_CD.md) for automatic tests, coverage reports, and manually triggered deployment to the CMU VM.
