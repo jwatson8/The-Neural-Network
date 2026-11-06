@@ -342,7 +342,7 @@ class DatabaseInteractionTests(unittest.TestCase):
             serve_duration_ms=12,
             model_route="collaborative_svd",
             model_version="m1",
-            recommendations=[{"movie_id": "movie-1", "model_score": 4.2}],
+            recommendations=[{"movie_id": "movie-1", "model_score": 0.42}],
         )
         usage = llm_usage.create(
             user_id="user-1",

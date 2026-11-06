@@ -9,6 +9,7 @@ from src.data_quality.boundary import (
     validate_recommendation_response,
 )
 from src.database.schemas import RecommendationItem
+from pydantic import ValidationError
 
 
 class RecommendationValidationTests(unittest.TestCase):
@@ -128,8 +129,8 @@ class RecommendationValidationTests(unittest.TestCase):
                 self.assert_invalid(validate_recommendation_response, raw, ())
 
     def test_valid_optional_model_scores(self) -> None:
-        for fields in ({}, {"model_score": None}, {"model_score": -5.5},
-                       {"model_score": 0}, {"model_score": 1000}, {"model_score": "1.5"}):
+        for fields in ({}, {"model_score": None}, {"model_score": -1},
+                       {"model_score": 0}, {"model_score": 1}, {"model_score": "0.5"}):
             with self.subTest(fields=fields):
                 raw = {"movie_id": "test-a", **fields}
                 item, errors = validate_recommendation_item(raw)
@@ -148,6 +149,29 @@ class RecommendationValidationTests(unittest.TestCase):
                     validate_recommendation_item,
                     {"movie_id": "test-a", "model_score": score}, ("model_score",),
                 )
+
+    def test_model_scores_outside_inclusive_range_are_rejected_not_clipped(self) -> None:
+        for score, error_type in ((-1.000001, "greater_than_equal"),
+                                  (1.000001, "less_than_equal"),
+                                  (-5.5, "greater_than_equal"), (1.02, "less_than_equal")):
+            with self.subTest(score=score):
+                raw = {"movie_id": "test-a", "model_score": score}
+                item, errors = validate_recommendation_item(raw)
+                self.assertIsNone(item)
+                self.assertEqual(errors[0]["loc"], ("model_score",))
+                self.assertEqual(errors[0]["type"], error_type)
+                self.assertIn("1", errors[0]["msg"])
+                self.assertEqual(raw["model_score"], score)
+
+    def test_direct_recommendation_item_schema_enforces_score_contract(self) -> None:
+        for score in (-1, -0.5, 0, 0.5, 1, None):
+            with self.subTest(valid_score=score):
+                item = RecommendationItem(movie_id="test-a", model_score=score)
+                self.assertEqual(item.model_score, score)
+        for score in (-1.000001, 1.000001, 1.02, True, False, float("nan"),
+                      float("inf"), -float("inf"), "NaN", "Infinity", [], {}, "bad", 1j):
+            with self.subTest(invalid_score=score), self.assertRaises(ValidationError):
+                RecommendationItem(movie_id="test-a", model_score=score)
 
     def test_item_requires_movie_id(self) -> None:
         self.assert_invalid(validate_recommendation_item, {}, ("movie_id",))

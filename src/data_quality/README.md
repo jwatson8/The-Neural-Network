@@ -147,9 +147,23 @@ such as `("recommendations", 2, "movie_id")`.
 `validate_recommendation_item({"movie_id": "movie-a", "model_score": -0.5})`
 is a separate **internal/persistence item** helper, not a public response format.
 It reuses Nathan's `RecommendationItem`, rejects extra fields and numeric boolean
-scores, and requires present non-null scores to be finite. Optional scores can
-be missing or null. Numeric string coercion follows Nathan's schema. Finite
-negative scores and scores above 10 are valid; ranking scores are not ratings.
+scores, and requires present non-null scores to be finite and within inclusive
+`[-1, 1]`, per Nathan's PR #41 review. Both endpoints are valid; values outside
+the interval are rejected, never clamped. Optional scores can be missing or null.
+Existing numeric string parsing is preserved, and input dictionaries are not
+mutated. The same constraints apply to direct `recommendation_serves.create()`
+callers through the shared schema.
+
+This is a stricter telemetry contract than the current model mathematics:
+`service/model_adapter.py` computes SVD dot products without a `[-1, 1]` guarantee;
+`service/cold_start.py` combines similarities and normalized popularity with a
+theoretical upper bound of 1.02. Mapping those raw scores into `model_score` can
+now reject an entire serve audit, including otherwise valid recommendation items.
+The offline `model/recommender.py` returns a `score` field and is unaffected until
+mapped to this schema. The current Flask path returns/stores IDs and route/hash
+evidence without numeric scores, so its ranking behavior remains unchanged.
+Popularity fallback scores from the repository-built model remain within [0, 1].
+No scoring algorithms, normalization or clamping are introduced by this change.
 The existing M0 CLI in `src/model/recommender.py` emits `score`, along with title
 and method data. It is not the HTTP contract or canonical persistence item: an
 integration owner must explicitly map `score` to `model_score` and select fields

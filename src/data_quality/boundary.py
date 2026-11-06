@@ -50,14 +50,11 @@ def validate_recommendation_item(
 ) -> tuple[RecommendationItem | None, list[dict]]:
     """Validate a canonical internal item, not a public HTTP response.
 
-    Optional model_score uses Nathan's schema with an additional finite-number
-    check. This schema belongs to persistence; scores have no rating-like bound.
+    Optional model_score must be finite and within inclusive [-1, 1]. The shared
+    schema enforces this for boundary and direct database callers without clipping.
     """
     if not isinstance(raw_item, dict):
         return None, _response_error((), "Recommendation item must be an object")
-    score = raw_item.get("model_score")
-    if isinstance(score, bool):
-        return None, _response_error(("model_score",), "Model score cannot be a boolean")
     try:
         item = RecommendationItem.model_validate(raw_item)
     except ValidationError as exc:
@@ -67,8 +64,6 @@ def validate_recommendation_item(
     errors = []
     if not item.movie_id.strip() or any(char in item.movie_id for char in ",\r\n"):
         errors.extend(_response_error(("movie_id",), "Movie ID must be nonblank and contain no comma or line break"))
-    if item.model_score is not None and not isfinite(item.model_score):
-        errors.extend(_response_error(("model_score",), "Model score must be finite"))
     return (None, errors) if errors else (item, [])
 
 

@@ -6,7 +6,7 @@ from math import isnan
 from typing import Literal
 from uuid import UUID
 
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, FiniteFloat, field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
 
@@ -143,7 +143,14 @@ class StreamEventCreate(DatabaseSchema):
 
 class RecommendationItem(DatabaseSchema):
     movie_id: str = Field(min_length=1, max_length=255)
-    model_score: float | None = None
+    model_score: FiniteFloat | None = Field(default=None, ge=-1, le=1)
+
+    @field_validator("model_score", mode="before")
+    @classmethod
+    def reject_boolean_score(cls, value):
+        if isinstance(value, bool):
+            raise ValueError("model_score must be a finite number in [-1, 1], not a boolean")
+        return value
 
 
 class RecommendationServeCreate(DatabaseSchema):

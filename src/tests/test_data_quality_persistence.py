@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.schema import CreateTable
 from sqlmodel import SQLModel, create_engine
 
-from src.database.interactions import data_quality_logs, movies, stream_events, users
+from src.database.interactions import data_quality_logs, movies, recommendation_serves, stream_events, users
 from src.database.models import DataQualityLog
 from src.database.schemas import StreamEventCreate
 from src.data_quality.drift import detect_rating_drift
@@ -204,6 +204,23 @@ class DataQualityPersistenceTests(unittest.TestCase):
             stream_events.create(user_id="test", event_type="rating", event_time=self.now, movie_id="test", rating=99)
         with self.assertRaises(ValidationError):
             stream_events.create_many([self.event(rating=99)])
+
+    def test_direct_serve_writes_enforce_score_range_and_preserve_valid_scores(self) -> None:
+        self.seed()
+        fields = dict(user_id="test-user", served_at=self.now, model_route="test-route",
+                      model_version="test-version", request_received_at=self.now, serve_duration_ms=1)
+        for score in (-1, 1):
+            row = recommendation_serves.create(
+                **fields, recommendations=[{"movie_id": "test-movie", "model_score": score}]
+            )
+            self.assertEqual(row.recommendations[0]["model_score"], score)
+        for score in (-1.01, 1.02, True, float("nan"), float("inf"), -float("inf"), [], "bad"):
+            with self.subTest(score=score), self.assertRaises(ValidationError) as raised:
+                recommendation_serves.create(
+                    **fields, recommendations=[{"movie_id": "test-movie", "model_score": score}]
+                )
+            self.assertEqual(raised.exception.errors()[0]["loc"], ("recommendations", 0, "model_score"))
+        self.assertEqual(len(recommendation_serves.list_records()), 2)
 
     def test_ingestion_database_outage_propagates_for_retry(self) -> None:
         writer = Mock(side_effect=SQLAlchemyError("outage"))
