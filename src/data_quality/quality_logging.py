@@ -3,8 +3,12 @@
 import json
 import logging
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from math import isfinite
-from typing import get_args
+from typing import Protocol, get_args
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from pydantic_core import ErrorType
 
@@ -24,6 +28,67 @@ DRIFT_LEVELS = {
     "insufficient_data": logging.INFO,
     "invalid_data": logging.ERROR,
 }
+
+
+class LogContext(BaseModel):
+    """Explicit database-only correlation IDs; never copied from rejected input."""
+
+    model_config = ConfigDict(extra="forbid")
+    user_id: str | None = Field(default=None, min_length=1, max_length=255)
+    movie_id: str | None = Field(default=None, min_length=1, max_length=255)
+    event_id: UUID | None = None
+    request_id: UUID | None = None
+
+
+class QualityLogSink(Protocol):
+    def write(self, record: Mapping[str, object]) -> None:
+        """Persist one sanitized record; no JSON logger configuration required."""
+
+
+class PostgresQualityLogSink:
+    """Use the existing repository and its independent, rollback-safe session."""
+
+    def write(self, record: Mapping[str, object]) -> None:
+        from src.database.interactions import data_quality_logs
+
+        data_quality_logs.create(**record)
+
+
+POSTGRES_SINK = PostgresQualityLogSink()
+
+
+def _emit(
+    target: logging.Logger, level: int, payload: dict,
+    sink: QualityLogSink | None, context: LogContext | None,
+) -> None:
+    if context is not None and not isinstance(context, LogContext):
+        raise TypeError("context must be a LogContext")
+    if sink is not None and not callable(getattr(sink, "write", None)):
+        raise TypeError("sink must expose write(record), or be None")
+    # Encode first: the sink receives a detached, JSON-safe allowlisted record.
+    message = json.dumps(payload, allow_nan=False, sort_keys=True)
+    if level == logging.WARNING:
+        target.warning(message)
+    else:
+        target.log(level, message)
+    if sink is None:
+        return
+    safe_payload = json.loads(message)
+    record = {
+        "occurred_at": datetime.now(UTC), "source": safe_payload.pop("source"),
+        "severity": logging.getLevelName(level), "issue_type": safe_payload.pop("issue_type"),
+        "error_details": safe_payload.pop("errors"), "log_metadata": safe_payload,
+        **(context.model_dump(exclude_none=True) if context is not None else {}),
+    }
+    try:
+        sink.write(record)
+    except Exception:
+        # A sink is best-effort. Never include exception text, SQL, context IDs,
+        # credentials or a traceback, and never recursively invoke persistence.
+        target.error(json.dumps({
+            "source": record["source"], "issue_type": "quality_log_persistence_failure",
+            "fallback": "python_logging",
+        }, sort_keys=True))
 
 
 def _logger(logger: logging.Logger | None) -> logging.Logger:
@@ -78,6 +143,8 @@ def log_validation_failure(
     *,
     rejected_record_count: int = 1,
     logger: logging.Logger | None = None,
+    sink: QualityLogSink | None = POSTGRES_SINK,
+    context: LogContext | None = None,
 ) -> None:
     """Emit one WARNING summary; never accept a raw record or identifier.
 
@@ -97,11 +164,13 @@ def log_validation_failure(
         "validation_failure_count": len(issues), "rejected_record_count": count,
         "errors": issues,
     }
-    target.warning(json.dumps(payload, allow_nan=False, sort_keys=True))
+    _emit(target, logging.WARNING, payload, sink, context)
 
 
 def log_drift_result(
     result: Mapping[str, object], *, logger: logging.Logger | None = None,
+    sink: QualityLogSink | None = POSTGRES_SINK,
+    context: LogContext | None = None,
 ) -> None:
     """Emit one existing drift result, retaining metrics but excluding raw errors.
 
@@ -136,4 +205,4 @@ def log_drift_result(
         "min_samples": _count(result["min_samples"], "min_samples", minimum=1),
         "status": status, "validation_failure_count": len(issues), "errors": issues,
     }
-    target.log(DRIFT_LEVELS[status], json.dumps(payload, allow_nan=False, sort_keys=True))
+    _emit(target, DRIFT_LEVELS[status], payload, sink, context)

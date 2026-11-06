@@ -333,10 +333,12 @@ Existing validators and detectors remain pure and never log automatically.
 log_validation_failure(
     source: str, errors: Sequence[Mapping], *,
     rejected_record_count: int = 1, logger: logging.Logger | None = None,
+    sink: QualityLogSink | None = POSTGRES_SINK, context: LogContext | None = None,
 ) -> None
 
 log_drift_result(
     result: Mapping[str, object], *, logger: logging.Logger | None = None,
+    sink: QualityLogSink | None = POSTGRES_SINK, context: LogContext | None = None,
 ) -> None
 ```
 
@@ -418,7 +420,8 @@ handlers/propagation can still duplicate output and must be configured by the
 application owner. No new logging dependency is required.
 
 Malformed logger inputs raise `TypeError`, `ValueError` or `KeyError`; unexpected
-programming exceptions propagate. The logger does not recompute drift decisions
+errors outside the best-effort sink propagate. Sink failures emit a sanitized
+fallback diagnostic instead of interrupting ingestion/serving. The logger does not recompute drift decisions
 or repair invalid result structures. Redaction deliberately reduces detail for
 unknown fields and row indices. Counts are per call, not persisted totals, rates,
 or unique-event metrics; aggregation, alert routing and rate limiting belong to
@@ -578,7 +581,7 @@ ingestion owners establish that contract. Offline/online evaluation owners must
 choose population/window filters, define correlation and late-data handling,
 calibrate drift thresholds, and call these helpers from their own workflow.
 
-## Verified test coverage
+## Historical test coverage (before PostgreSQL log persistence)
 
 Measured on 2026-11-03 (local time) using Python 3.12.9 and coverage.py 7.17.1.
 CI's existing command is `python -m unittest discover -s src/tests -v`, with
@@ -648,3 +651,169 @@ regenerable artifact. The repository root `.gitignore` excludes `.coverage*`,
 verified with `git check-ignore`; no generated coverage output is intended for
 Git. Keep future coverage commands pointed at these paths (or another explicitly
 ignored artifact directory).
+
+## PR review update: database-owned validation and PostgreSQL log storage
+
+The current `src/service/course_stream.py` consumes course **text** messages for
+account/profile jobs and recommendation evidence in `ProfileStore`. It does not
+yet write decoded stream events through Nathan's PostgreSQL interaction API.
+No duplicate-validator call chain actually exists in that service today. Its text
+parser, SQLite behavior, offset commits and retry policy remain unchanged; no
+unverified watch/rating text format or automatic PostgreSQL migration is added.
+
+### One validation at the ingestion handoff
+
+`src/data_quality/ingestion.py:persist_stream_event(raw_event, *, create_many=None,
+logger=None, sink=POSTGRES_SINK, context=None)` is the handoff for the consumer
+owner's decoded event writer. It calls the **public**
+`stream_events.create_many([raw_event])` directly. That API performs Nathan's
+`StreamEventCreate.model_validate()` exactly once per raw event, then executes
+its existing replay-safe insert. No pre-call to `validate_stream_event()` or
+round trip from validated model back to dictionary is needed. The standalone
+boundary validator remains available for offline/non-persistence callers;
+`stream_events.create()` and `create_many()` keep their existing validation for
+every other database caller. No trusted/unvalidated database write API is added.
+
+```python
+from src.data_quality.ingestion import persist_stream_event
+
+inserted, errors = persist_stream_event(decoded_event)
+if errors:
+    # Already logged safely. Consumer owner chooses rejection evidence/commit policy.
+    pass
+# inserted == 1: stored; inserted == 0: existing deterministic event UUID.
+# inserted is None: input rejected. Processing a later event is still safe.
+```
+
+Only Pydantic input errors are caught and converted to `(None, errors)`; errors
+exclude raw input and context and are logged with source `kafka`. Database
+connection/integrity/transaction failures propagate so the consumer must **not**
+advance offsets for a failed event write. Log-storage failures are separately
+best-effort and never turn an input rejection into a consumer exception. Supply a
+stable `event_id` from a verified ingestion identity for replay safety; an omitted
+ID follows the database's existing random UUID behavior. Parent user/movie rows
+must exist for accepted events. No parser, identity or parent rows are invented.
+The hook is covered with real repository writes on in-memory SQLite and a spy
+asserting one `StreamEventCreate.model_validate()` call. Wiring this hook after
+the consumer owner's verified decoding step is still required; it is not wired
+into the existing unrelated text/ProfileStore path.
+
+### Storage architecture
+
+Both public logging functions now default to `POSTGRES_SINK`, a stateless
+`PostgresQualityLogSink` implementing `QualityLogSink.write(record)`. JSON
+messages are still emitted first through Python logging with the same sanitized
+schema. The sink receives a detached JSON-safe record containing only approved
+fields. `sink=None` explicitly selects JSON-only logging; tests or a future Loki
+implementation can inject another sink without changing validators/detectors.
+There are no global handlers, backend environment toggles or import-time reads.
+
+`src/database/models.py:DataQualityLog` registers the append-only
+`data_quality_logs` table with Nathan's existing SQLModel metadata:
+
+- `log_id` UUID primary key and indexed UTC `occurred_at` timestamp.
+- Indexed `source`, `severity`, `issue_type` labels.
+- `error_details` JSONB containing sanitized field/error-code entries, never
+  Pydantic `msg`, `input`, exception context, credentials or raw payloads.
+- `log_metadata` JSONB containing sanitized counts or drift metric/score/status
+  data already selected by `quality_logging`; arbitrary additional metadata is
+  not accepted by the public logging helpers.
+- Optional indexed `user_id`, `movie_id`, `event_id`, `request_id` for explicit
+  debugging correlation. These deliberately have **no foreign keys**: rejected
+  events may reference nonexistent rows. IDs are nullable and never inferred
+  from an untrusted rejected payload.
+
+```python
+from src.data_quality.quality_logging import LogContext, log_validation_failure
+
+log_validation_failure(
+    "recommendation_api", errors,
+    context=LogContext(request_id=verified_request_uuid),
+)
+# Optional user_id/movie_id/event_id may be supplied from trusted request context.
+# Context IDs go only to database columns, never JSON messages or fallback logs.
+log_validation_failure("kafka", errors, sink=None)  # portable JSON-only mode
+```
+
+Correlation IDs are sensitive operational data: supply only those necessary for
+debugging and limit database access/retention accordingly. The repository's
+low-level `create` accepts structured JSON, so direct repository callers are
+responsible for the same sanitization policy; application code should use the
+quality logger instead of passing arbitrary dictionaries to persistence.
+
+`src/database/interactions/data_quality_logs.py` uses the shared `run`,
+`create_record`, `schema_values`, session lifecycle and pagination helpers:
+
+```python
+from src.database.interactions import data_quality_logs
+
+page = data_quality_logs.search(
+    start=start_utc, end=end_utc, source="kafka", severity="WARNING", limit=100,
+)
+# Use page.next_cursor with identical filters to retrieve subsequent pages.
+row = data_quality_logs.get(log_id)
+rows = data_quality_logs.list_records(offset=0, limit=100)
+```
+
+Search also supports issue type and optional correlation-ID filters. Timestamp
+windows are half-open; reads follow existing newest-first timestamp/UUID cursor
+ordering. Each write uses a separate short transaction from event persistence;
+failed log writes roll back without poisoning the event/request transaction.
+The existing `python -m src.database.initialize` command creates the additional
+table through metadata `create_all`; no destructive migration or new connection
+logic is introduced. Deployment owners must run that existing initialization step
+before expecting database logs. No production DDL was executed during this task.
+
+### Failure and operational limits
+
+If any sink write raises an ordinary Exception, the original sanitized JSON
+entry remains in the Python log and one ERROR JSON message with issue type
+`quality_log_persistence_failure` and `fallback="python_logging"` is emitted.
+Exception strings, SQL/bind parameters, tracebacks and correlation IDs are never
+included. There is no recursive persistence attempt. Invalid caller options
+(bad sink/context) raise before emission; errors raised by Python handlers and
+process interrupts are not hidden. Sink bugs are made visible by the same fallback
+instead of crashing a recommendation request or Kafka input-rejection handler.
+
+Persistence is synchronous/best-effort, not a durable queue or an atomic part of
+the event write. It can add database latency and remains subject to Nathan's
+existing connection/pool timeouts. No automatic retries, circuit breaker,
+retention cleanup, exactly-once log semantics, Loki client or scheduled service is
+added. Integration owners should monitor fallback diagnostics and set operational
+timeouts/retention; a future asynchronous/Loki sink can replace this implementation.
+
+### Review-update test results
+
+New tests are in `src/tests/test_data_quality_persistence.py`. They use in-memory
+SQLite via the existing repository engine injection, not live PostgreSQL or
+Kafka. PostgreSQL JSONB/UTC timestamp DDL is compiled as an additional dialect
+check; this is not a claim of a live PostgreSQL deployment test. Tests cover
+append/read/search, IDs, pagination, all drift statuses, missing-table rollback,
+privacy, pluggable/disabled sinks, malformed Kafka inputs, single validation,
+duplicate UUID inserts, preserved validation for other callers, and sink failures.
+
+Executed on 2026-11-05 using Python 3.12.9:
+
+- New persistence/ingestion tests: **18 passed**.
+- All Data Quality tests: **146 passed**.
+- Full `src/tests` suite: **160 passed**.
+- Separate `src/database/tests` suite: **13 passed** (173 full-suite executions).
+- Updated Data Quality statement/branch coverage: **100.00%**, 445 statements
+  and 178 branches, including the new ingestion module. HTML report regenerated
+  at the existing ignored `src/data_quality/htmlcov/index.html` path. The earlier
+  coverage table above is retained as the historical pre-review measurement.
+
+Commands (from the repository root, using the existing temporary environment):
+
+```sh
+/tmp/m2-boundary-venv/bin/python -m unittest discover -s src/tests -p 'test_data_quality_persistence.py' -v
+
+PROFILE_DB_PATH=/tmp/m2-boundary-venv/test-state/profiles.sqlite3 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /tmp/m2-boundary-venv/bin/python -m unittest discover -s src/tests -p 'test_data_quality*.py' -v
+
+COVERAGE_FILE=src/data_quality/.coverage PROFILE_DB_PATH=/tmp/m2-boundary-venv/test-state/profiles.sqlite3 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /tmp/m2-boundary-venv/bin/python -m coverage run --branch --source=src/data_quality -m unittest discover -s src/tests -v
+
+COVERAGE_FILE=src/data_quality/.coverage /tmp/m2-boundary-venv/bin/python -m coverage run --append --branch --source=src/data_quality -m unittest discover -s src/database/tests -v
+
+COVERAGE_FILE=src/data_quality/.coverage /tmp/m2-boundary-venv/bin/python -m coverage report -m --precision=2
+COVERAGE_FILE=src/data_quality/.coverage /tmp/m2-boundary-venv/bin/python -m coverage html -d src/data_quality/htmlcov
+```

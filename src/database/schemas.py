@@ -14,6 +14,27 @@ class DatabaseSchema(SQLModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class DataQualityLogCreate(DatabaseSchema):
+    occurred_at: datetime | None = None
+    source: Literal["kafka", "user_api", "movie_api", "recommendation_api", "drift"]
+    severity: Literal["INFO", "WARNING", "ERROR"]
+    issue_type: Literal["validation_failure", "drift_result"]
+    error_details: list[dict] = Field(default_factory=list)
+    log_metadata: dict = Field(default_factory=dict)
+    user_id: str | None = Field(default=None, min_length=1, max_length=255)
+    movie_id: str | None = Field(default=None, min_length=1, max_length=255)
+    event_id: UUID | None = None
+    request_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def normalize_log_time(self):
+        if self.occurred_at is not None:
+            if self.occurred_at.utcoffset() is None:
+                raise ValueError("occurred_at must include a timezone")
+            self.occurred_at = self.occurred_at.astimezone(UTC)
+        return self
+
+
 class UserCreate(DatabaseSchema):
     user_id: str = Field(min_length=1, max_length=255)
     first_seen: datetime | None = None

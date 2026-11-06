@@ -19,6 +19,9 @@ class Unprintable:
 
 class QualityLoggingTests(unittest.TestCase):
     def setUp(self) -> None:
+        sink_patch = patch("src.data_quality.quality_logging.POSTGRES_SINK.write")
+        self.addCleanup(sink_patch.stop)
+        sink_patch.start()
         self.logger = logging.getLogger(f"quality-test.{self.id()}")
         self.errors = [{"loc": ("rating",), "type": "less_than_equal", "msg": "unused"}]
 

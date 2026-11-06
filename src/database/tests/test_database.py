@@ -55,7 +55,7 @@ class DatabaseInteractionTests(unittest.TestCase):
 
     def test_schema_and_database_url_configuration(self):
         inspector = sqlalchemy_inspect(self.engine)
-        self.assertEqual(len(inspector.get_table_names()), 8)
+        self.assertEqual(len(inspector.get_table_names()), 9)
         self.assertEqual(
             inspector.get_pk_constraint("user_movie_history")["constrained_columns"],
             ["user_id", "movie_id"],

@@ -19,6 +19,9 @@ from src.data_quality.database_reader import (
 
 class DatabaseReaderTests(unittest.TestCase):
     def setUp(self) -> None:
+        sink_patch = patch("src.data_quality.quality_logging.POSTGRES_SINK.write")
+        self.addCleanup(sink_patch.stop)
+        sink_patch.start()
         self.start = datetime(2026, 1, 1, tzinfo=UTC)
         self.end = self.start + timedelta(days=1)
         self.logger = logging.getLogger(f"database-reader-test.{self.id()}")
