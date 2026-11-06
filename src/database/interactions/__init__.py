@@ -25,6 +25,7 @@ and ``RecordNotFoundError`` identifies updates of missing records.
 from src.database.interactions import (
     cold_start_jobs,
     cold_start_profiles,
+    data_quality_logs,
     llm_usage,
     movies,
     recommendation_serves,
@@ -41,6 +42,7 @@ __all__ = [
     "SearchPage",
     "cold_start_jobs",
     "cold_start_profiles",
+    "data_quality_logs",
     "llm_usage",
     "movies",
     "recommendation_serves",
