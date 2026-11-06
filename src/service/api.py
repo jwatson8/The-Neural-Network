@@ -8,6 +8,7 @@ from pathlib import Path
 
 import joblib
 from flask import Flask, Response, jsonify
+from werkzeug.exceptions import HTTPException
 
 from src.service.cold_start import recommend_cold_start
 from src.service.model_adapter import recommend, validate_model
@@ -44,6 +45,15 @@ def create_app(model=None, profile_store=None, config=None):
     app.extensions['recommendation_model'] = model
     app.extensions['profile_store'] = store
 
+    @app.errorhandler(HTTPException)
+    def handle_http_error(error):
+        return jsonify(error=error.name, message=error.description), error.code
+
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(error):
+        logger.exception('unhandled_api_error')
+        return jsonify(error='Internal Server Error', message='An unexpected error occurred'), 500
+
     @app.get('/health')
     def health():
         ready = app.extensions['recommendation_model'] is not None
@@ -55,10 +65,13 @@ def create_app(model=None, profile_store=None, config=None):
 
     @app.get('/recommend/<string:user_id>')
     def recommendation(user_id):
+        if not user_id.strip():
+            return jsonify(error='Bad Request', message='user_id must not be blank'), 400
+
         started = time.perf_counter()
         loaded_model = app.extensions['recommendation_model']
         if loaded_model is None:
-            return Response('Model unavailable', status=503, mimetype='text/plain')
+            return jsonify(error='Service Unavailable', message='Model unavailable'), 503
 
         if loaded_model['seen'].get(user_id):
             movie_ids, route = recommend(loaded_model, user_id, k=20)

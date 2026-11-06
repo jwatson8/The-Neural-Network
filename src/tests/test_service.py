@@ -81,6 +81,24 @@ class ServiceTests(unittest.TestCase):
         self.assertNotIn('movie-0', ids)
         self.assertNotIn('\n', response.get_data(as_text=True))
 
+    def test_blank_user_id_returns_bad_request_json(self):
+        response = self.client.get('/recommend/%20%20')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error'], 'Bad Request')
+        self.assertEqual(response.get_json()['message'], 'user_id must not be blank')
+
+    def test_unknown_route_returns_not_found_json(self):
+        response = self.client.get('/not-a-route')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json()['error'], 'Not Found')
+
+    def test_unexpected_error_returns_generic_internal_server_error(self):
+        with patch('src.service.api.recommend', side_effect=RuntimeError('private detail')):
+            response = self.client.get('/recommend/warm')
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json()['error'], 'Internal Server Error')
+        self.assertNotIn('private detail', response.get_data(as_text=True))
+
     def test_unknown_id_gets_fast_fallback_and_is_queued(self):
         response = self.client.get('/recommend/new-user')
         ids = response.get_data(as_text=True).split(',')
