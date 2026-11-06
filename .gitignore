@@ -13,3 +13,7 @@ state/
 .coverage*
 htmlcov/
 coverage.json
+.pytest_cache/
+reports/
+.deployment.lock
+

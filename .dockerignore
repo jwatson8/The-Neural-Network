@@ -7,6 +7,10 @@ __pycache__
 !.env.example
 artifacts
 state
+reports
+.coverage
+.pytest_cache
+.deployment.lock
 **/__pycache__
 src/app/data
 src/app/fullTrainedModel
