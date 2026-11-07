@@ -93,6 +93,28 @@ class DatabaseInteractionTests(unittest.TestCase):
         with self.assertRaises(RecordNotFoundError):
             users.update("missing", age=20)
 
+    def test_get_user_history_returns_only_requested_users_rows(self):
+        self.seed_catalog()
+        movies.create(movie_id="movie-2", title="Second movie")
+        movies.create(movie_id="movie-3", title="Third movie")
+        users.create(user_id="user-2")
+        user_movie_history.upsert(
+            user_id="user-1", movie_id="movie-2", latest_rating=7
+        )
+        user_movie_history.upsert(
+            user_id="user-1", movie_id="movie-1", latest_rating=9
+        )
+        user_movie_history.upsert(
+            user_id="user-2", movie_id="movie-3", latest_rating=5
+        )
+
+        history = user_movie_history.get_user_history("user-1")
+
+        self.assertEqual([row.movie_id for row in history], ["movie-1", "movie-2"])
+        self.assertEqual([row.latest_rating for row in history], [9, 7])
+        self.assertTrue(all(row.user_id == "user-1" for row in history))
+        self.assertEqual(user_movie_history.get_user_history("missing"), [])
+
     def test_raw_csv_event_normalization_and_validation(self):
         event = StreamEventCreate.model_validate(
             {
