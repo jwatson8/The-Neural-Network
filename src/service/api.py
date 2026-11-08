@@ -1,6 +1,7 @@
 """Flask recommendation API; model inference stays out of cold-start I/O."""
 
 import logging
+import hashlib
 import os
 import time
 from datetime import UTC, datetime
@@ -38,12 +39,17 @@ def create_app(model=None, profile_store=None, config=None):
     if config:
         app.config.update(config)
 
+    model_sha256 = None
     if model is None:
         model_path = Path(app.config['MODEL_PATH'])
         if model_path.is_file():
-            model = joblib.load(model_path)
+            with model_path.open('rb') as stream:
+                model_sha256 = hashlib.file_digest(stream, 'sha256').hexdigest()
+                stream.seek(0)
+                model = joblib.load(stream)
     if model is not None:
         validate_model(model)
+        app.config['MODEL_VERSION'] = model.get('update_metadata', {}).get('version', app.config['MODEL_VERSION'])
 
     store = profile_store or ProfileStore()
     if profile_store is None:
@@ -70,7 +76,8 @@ def create_app(model=None, profile_store=None, config=None):
             store.healthy()
         except Exception:
             ready = False
-        return jsonify(status='ok' if ready else 'not_ready'), 200 if ready else 503
+        return jsonify(status='ok' if ready else 'not_ready', model_version=app.config['MODEL_VERSION'],
+                       model_sha256=model_sha256), 200 if ready else 503
 
     @app.get('/database/summary')
     def public_database_summary():

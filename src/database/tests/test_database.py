@@ -57,7 +57,7 @@ class DatabaseInteractionTests(unittest.TestCase):
 
     def test_schema_and_database_url_configuration(self):
         inspector = sqlalchemy_inspect(self.engine)
-        self.assertEqual(len(inspector.get_table_names()), 9)
+        self.assertEqual(len(inspector.get_table_names()), 10)
         self.assertEqual(
             inspector.get_pk_constraint("user_movie_history")["constrained_columns"],
             ["user_id", "movie_id"],
@@ -371,7 +371,7 @@ class DatabaseInteractionTests(unittest.TestCase):
             serve_duration_ms=12,
             model_route="collaborative_svd",
             model_version="m1",
-            recommendations=[{"movie_id": "movie-1", "model_score": 4.2}],
+            recommendations=[{"movie_id": "movie-1", "model_score": 0.42}],
         )
         usage = llm_usage.create(
             user_id="user-1",

@@ -17,6 +17,23 @@ def utc_now() -> datetime:
 JSON_DOCUMENT = JSONB().with_variant(JSON(), "sqlite")
 
 
+class DataQualityLog(SQLModel, table=True):
+    __tablename__ = "data_quality_logs"
+
+    log_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    occurred_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False, index=True)
+    source: str = Field(max_length=100, index=True)
+    severity: str = Field(max_length=20, index=True)
+    issue_type: str = Field(max_length=100, index=True)
+    error_details: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON_DOCUMENT, nullable=False))
+    log_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False))
+    # Deliberately not foreign keys: rejected records may refer to absent rows.
+    user_id: str | None = Field(default=None, max_length=255, index=True)
+    movie_id: str | None = Field(default=None, max_length=255, index=True)
+    event_id: UUID | None = Field(default=None, index=True)
+    request_id: UUID | None = Field(default=None, index=True)
+
+
 class User(SQLModel, table=True):
     __tablename__ = "users"
 

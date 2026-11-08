@@ -17,6 +17,26 @@ x-database-connection: &database-connection
   DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
 
 services:
+  daily-model-updater:
+    <<: *service
+    image: ${DAILY_MODEL_IMAGE:-the-neural-network:local}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    command: [python, -m, src.model_updates.scheduler]
+    cpus: 1.0
+    mem_limit: 2g
+    environment:
+      <<: *database-connection
+      DAILY_MODEL_UPDATES_ENABLED: ${DAILY_MODEL_UPDATES_ENABLED:-true}
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+    volumes:
+      - type: bind
+        source: ./artifacts
+        target: /artifacts
+        bind: {create_host_path: false}
+    depends_on:
+      database-init: {condition: service_completed_successfully}
+
   database:
     image: postgres:17-bookworm
     restart: unless-stopped
