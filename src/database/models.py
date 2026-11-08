@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Index, JSON, Text
+from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Index, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -24,12 +24,21 @@ class DataQualityLog(SQLModel, table=True):
     __tablename__ = "data_quality_logs"
 
     log_id: UUID = Field(default_factory=uuid4, primary_key=True)
-    occurred_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False, index=True)
+    occurred_at: datetime = Field(
+        default_factory=utc_now,
+        sa_type=DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
     source: str = Field(max_length=100, index=True)
     severity: str = Field(max_length=20, index=True)
     issue_type: str = Field(max_length=100, index=True)
-    error_details: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON_DOCUMENT, nullable=False))
-    log_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False))
+    error_details: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON_DOCUMENT, nullable=False)
+    )
+    log_metadata: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False)
+    )
     # Deliberately not foreign keys: rejected records may refer to absent rows.
     user_id: str | None = Field(default=None, max_length=255, index=True)
     movie_id: str | None = Field(default=None, max_length=255, index=True)
@@ -103,7 +112,12 @@ class User(SQLModel, table=True):
     __tablename__ = "users"
 
     user_id: str = Field(primary_key=True, max_length=255)
-    first_seen: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False, index=True)
+    first_seen: datetime = Field(
+        default_factory=utc_now,
+        sa_type=DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
     age: int | None = Field(default=None, ge=0)
     occupation: str | None = Field(default=None, max_length=255)
     gender: str | None = Field(default=None, max_length=50)
@@ -126,7 +140,9 @@ class Movie(SQLModel, table=True):
     vote_count: int | None = Field(default=None, ge=0)
     imdb_id: str | None = Field(default=None, max_length=50, index=True)
     tmdb_id: str | None = Field(default=None, max_length=50, index=True)
-    license_cost: Decimal | None = Field(default=None, max_digits=14, decimal_places=8, ge=0)
+    license_cost: Decimal | None = Field(
+        default=None, max_digits=14, decimal_places=8, ge=0
+    )
 
 
 class StreamEvent(SQLModel, table=True):
@@ -142,17 +158,31 @@ class StreamEvent(SQLModel, table=True):
             "(event_type = 'rating' AND movie_id IS NOT NULL AND rating IS NOT NULL)",
             name="ck_stream_event_shape",
         ),
-        CheckConstraint("rating IS NULL OR (rating >= 1 AND rating <= 10)", name="ck_stream_event_rating"),
-        CheckConstraint("minute_index IS NULL OR minute_index >= 0", name="ck_stream_event_minute"),
+        CheckConstraint(
+            "rating IS NULL OR (rating >= 1 AND rating <= 10)",
+            name="ck_stream_event_rating",
+        ),
+        CheckConstraint(
+            "minute_index IS NULL OR minute_index >= 0", name="ck_stream_event_minute"
+        ),
         Index("ix_stream_events_user_event_time", "user_id", "event_time"),
     )
 
     event_id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: str = Field(foreign_key="users.user_id", max_length=255, index=True)
     event_type: str = Field(max_length=100, index=True)
-    movie_id: str | None = Field(default=None, foreign_key="movies.movie_id", max_length=255, index=True)
-    event_time: datetime = Field(sa_type=DateTime(timezone=True), nullable=False, index=True)
-    stored_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False, index=True)
+    movie_id: str | None = Field(
+        default=None, foreign_key="movies.movie_id", max_length=255, index=True
+    )
+    event_time: datetime = Field(
+        sa_type=DateTime(timezone=True), nullable=False, index=True
+    )
+    stored_at: datetime = Field(
+        default_factory=utc_now,
+        sa_type=DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
     minute_index: int | None = Field(default=None, ge=0)
     rating: float | None = Field(default=None, ge=1, le=10)
 
@@ -168,25 +198,37 @@ class UserMovieHistory(SQLModel, table=True):
     )
 
     user_id: str = Field(primary_key=True, foreign_key="users.user_id", max_length=255)
-    movie_id: str = Field(primary_key=True, foreign_key="movies.movie_id", max_length=255)
+    movie_id: str = Field(
+        primary_key=True, foreign_key="movies.movie_id", max_length=255
+    )
     latest_rating: float | None = Field(default=None, ge=1, le=10)
-    stored_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
+    stored_at: datetime = Field(
+        default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
+    )
 
 
 class RecommendationServe(SQLModel, table=True):
     __tablename__ = "recommendation_serves"
     __table_args__ = (
-        CheckConstraint("serve_duration_ms >= 0", name="ck_recommendation_serve_duration"),
+        CheckConstraint(
+            "serve_duration_ms >= 0", name="ck_recommendation_serve_duration"
+        ),
         Index("ix_recommendation_serves_user_served", "user_id", "served_at"),
     )
 
     request_id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: str = Field(foreign_key="users.user_id", max_length=255, index=True)
-    served_at: datetime = Field(sa_type=DateTime(timezone=True), nullable=False, index=True)
+    served_at: datetime = Field(
+        sa_type=DateTime(timezone=True), nullable=False, index=True
+    )
     model_route: str = Field(max_length=100, index=True)
     model_version: str = Field(max_length=255, index=True)
-    recommendations: list[dict[str, Any]] = Field(sa_column=Column(JSON_DOCUMENT, nullable=False))
-    request_received_at: datetime = Field(sa_type=DateTime(timezone=True), nullable=False)
+    recommendations: list[dict[str, Any]] = Field(
+        sa_column=Column(JSON_DOCUMENT, nullable=False)
+    )
+    request_received_at: datetime = Field(
+        sa_type=DateTime(timezone=True), nullable=False
+    )
     serve_duration_ms: float = Field(ge=0)
 
 
@@ -195,18 +237,30 @@ class LLMUsage(SQLModel, table=True):
     __table_args__ = (
         CheckConstraint("input_tokens >= 0", name="ck_llm_input_tokens"),
         CheckConstraint("output_tokens >= 0", name="ck_llm_output_tokens"),
-        CheckConstraint("estimated_cost_usd IS NULL OR estimated_cost_usd >= 0", name="ck_llm_estimated_cost"),
+        CheckConstraint(
+            "estimated_cost_usd IS NULL OR estimated_cost_usd >= 0",
+            name="ck_llm_estimated_cost",
+        ),
         Index("ix_llm_usage_user_occurred", "user_id", "occurred_at"),
     )
 
     request_id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: str | None = Field(default=None, foreign_key="users.user_id", max_length=255, index=True)
-    occurred_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False, index=True)
+    user_id: str | None = Field(
+        default=None, foreign_key="users.user_id", max_length=255, index=True
+    )
+    occurred_at: datetime = Field(
+        default_factory=utc_now,
+        sa_type=DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
     provider: str = Field(max_length=100, index=True)
     model_name: str = Field(max_length=255, index=True)
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
-    estimated_cost_usd: Decimal | None = Field(default=None, max_digits=14, decimal_places=8, ge=0)
+    estimated_cost_usd: Decimal | None = Field(
+        default=None, max_digits=14, decimal_places=8, ge=0
+    )
     status: str = Field(max_length=50, index=True)
 
 
@@ -217,15 +271,23 @@ class ColdStartProfile(SQLModel, table=True):
     positive: str = Field(sa_type=Text)
     negative: str = Field(sa_type=Text)
     source_description_hash: str | None = Field(default=None, max_length=64, index=True)
-    llm_request_id: UUID | None = Field(default=None, foreign_key="llm_usage.request_id", index=True)
-    generated_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
-    updated_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
+    llm_request_id: UUID | None = Field(
+        default=None, foreign_key="llm_usage.request_id", index=True
+    )
+    generated_at: datetime = Field(
+        default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
+    )
+    updated_at: datetime = Field(
+        default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
+    )
 
 
 class ColdStartJob(SQLModel, table=True):
     __tablename__ = "cold_start_jobs"
     __table_args__ = (
-        CheckConstraint("status IN ('pending', 'processing')", name="ck_cold_start_job_status"),
+        CheckConstraint(
+            "status IN ('pending', 'processing')", name="ck_cold_start_job_status"
+        ),
         CheckConstraint("attempts >= 0", name="ck_cold_start_job_attempts"),
         Index("ix_cold_start_jobs_claim", "status", "next_attempt_at", "lease_until"),
     )
@@ -233,8 +295,14 @@ class ColdStartJob(SQLModel, table=True):
     user_id: str = Field(primary_key=True, foreign_key="users.user_id", max_length=255)
     status: str = Field(default="pending", max_length=20)
     attempts: int = Field(default=0, ge=0)
-    next_attempt_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
+    next_attempt_at: datetime = Field(
+        default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
+    )
     lease_until: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
-    created_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
-    updated_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
+    created_at: datetime = Field(
+        default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
+    )
+    updated_at: datetime = Field(
+        default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
+    )
     last_error: str | None = Field(default=None, sa_type=Text)

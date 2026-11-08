@@ -6,12 +6,18 @@ from uuid import UUID
 
 from sqlmodel import Session
 
-from src.database.interactions._pagination import SearchCursor, SearchPage, search_records
+from src.database.interactions._pagination import (
+    SearchCursor,
+    SearchPage,
+    search_records,
+)
 from src.database.interactions._shared import (
     create_record,
-    list_records as list_model_records,
     run,
     schema_values,
+)
+from src.database.interactions._shared import (
+    list_records as list_model_records,
 )
 from src.database.models import ModelLog
 from src.database.schemas import ModelTestLogCreate, ModelTrainingLogCreate
