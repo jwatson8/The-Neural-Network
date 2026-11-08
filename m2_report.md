@@ -34,9 +34,5 @@ Validation failures and drift results generate sanitized structured JSON logs, w
 
 - [ ] Replace every `#TODO` with the team's verified content.
 - [ ] Check the page limits for each section.
-- [ ] Check all implementation links relative to the repository root.
-- [ ] Add actual offline/online accuracy and cost results, not just plans.
-- [ ] Verify the live integration and deployment claims in Section 4.
-- [ ] Link a passing GitHub Actions run and a coverage report.
 - [ ] Include the final team-contract statement or revised contract.
 - [ ] Commit `m2_report.md` at the repository root; submit the latest commit URL to Canvas and schedule the mentor debrief.
