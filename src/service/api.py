@@ -18,6 +18,11 @@ from src.database.interactions import (
     recommendation_serves,
     users,
 )
+from src.data_quality.boundary import (
+    validate_recommendation_request,
+    validate_recommendation_response,
+)
+from src.data_quality.quality_logging import log_validation_failure
 from src.service.cold_start import recommend_cold_start
 from src.service.model_adapter import recommend, validate_model
 from src.service.store import ProfileStore
@@ -125,8 +130,13 @@ def create_app(model=None, profile_store=None, config=None):
 
     @app.get('/recommend/<string:user_id>')
     def recommendation(user_id):
-        if not user_id.strip():
-            return jsonify(error='Bad Request', message='user_id must not be blank'), 400
+        validated_request, errors = validate_recommendation_request(
+            {'user_id': user_id}, request.args
+        )
+        if errors:
+            log_validation_failure('recommendation_api', errors)
+            return jsonify(error='Bad Request', message='Invalid recommendation request'), 400
+        user_id = validated_request['user_id']
 
         request_received_at = datetime.now(UTC)
         started = time.perf_counter()
@@ -151,6 +161,13 @@ def create_app(model=None, profile_store=None, config=None):
             else:
                 movie_ids, route = result
 
+        response_body = ','.join(movie_ids)
+        response_items, errors = validate_recommendation_response(response_body)
+        if errors:
+            log_validation_failure('recommendation_api', errors)
+            return jsonify(error='Internal Server Error', message='Recommendation generation failed'), 500
+        movie_ids = [item.movie_id for item in response_items]
+
         elapsed_ms = (time.perf_counter() - started) * 1000
         users.create_missing_many([{'user_id': user_id}])
         recommendation_serves.create(
@@ -166,7 +183,7 @@ def create_app(model=None, profile_store=None, config=None):
             'recommendation user_id=%s route=%s model_version=%s duration_ms=%.2f status=200',
             user_id, route, app.config['MODEL_VERSION'], elapsed_ms,
         )
-        return Response(','.join(movie_ids), status=200, mimetype='text/plain')
+        return Response(response_body, status=200, mimetype='text/plain')
 
     return app
 

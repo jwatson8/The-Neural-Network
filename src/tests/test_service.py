@@ -8,6 +8,7 @@ from sqlmodel import SQLModel, create_engine
 
 from src.database.interactions import (
     cold_start_jobs,
+    data_quality_logs,
     movies,
     users,
 )
@@ -96,6 +97,29 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(len(ids), 20)
         self.assertNotIn('movie-0', ids)
         self.assertNotIn('\n', response.get_data(as_text=True))
+
+    def test_recommendation_rejects_unsupported_query_and_logs_sanitized_error(self):
+        response = self.client.get('/recommend/warm?private-field=secret-value')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error'], 'Bad Request')
+        records = data_quality_logs.list_records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].source, 'recommendation_api')
+        self.assertNotIn('secret-value', str(records[0].error_details))
+
+    def test_invalid_recommendation_output_is_logged_before_audit(self):
+        with patch(
+            'src.service.api.recommend',
+            return_value=(['invalid\nmovie-id'], 'collaborative_svd'),
+        ):
+            response = self.client.get('/recommend/warm')
+
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(self.create_recommendation_serve.called)
+        records = data_quality_logs.list_records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].source, 'recommendation_api')
 
     def test_recommendation_is_written_to_database_audit(self):
         response = self.client.get('/recommend/warm')

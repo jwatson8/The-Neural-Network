@@ -73,6 +73,15 @@ latest rating, and whether the most recent accepted rating changed its predecess
 Older and equal-time events remain in `stream_events` but do not regress the
 materialized history row.
 
+The course Kafka consumer routes account-created events through the service store
+to `src.data_quality.ingestion.persist_stream_event`, which delegates validation
+to `stream_events.create_many`. Event IDs are stable for a Kafka topic/partition/
+offset, so replayed records are deduplicated. Invalid records produce sanitized
+validation logs. Database errors are not converted to validation failures; they
+propagate before the consumer commits its polled batch, leaving it available for
+Kafka redelivery after restart. Recommendation-request lines are stored separately
+in `course_requests`, not as interaction events.
+
 New watch events also derive immutable licensing charges in the same transaction.
 The first watch for a user/movie pair is charged. Later watches are charged only
 when their event time is at least 24 hours after the preceding accepted watch.

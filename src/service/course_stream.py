@@ -5,6 +5,8 @@ import re
 from datetime import datetime
 
 from kafka import KafkaConsumer
+from pydantic import ValidationError
+from src.data_quality.quality_logging import log_validation_failure
 from src.service.store import ProfileStore
 
 logger = logging.getLogger(__name__)
@@ -16,13 +18,33 @@ def handle_line(store, topic, partition, offset, line):
         return 'ignored'
     _, user_id, event = [part.strip() for part in parts]
     if re.fullmatch(r'GET /create_account/?(?:\s+HTTP/\S+)?', event):
-        event_time = datetime.fromisoformat(parts[0].strip().replace('Z', '+00:00'))
-        store.record_account_created(user_id, event_time, topic, partition, offset)
+        try:
+            event_time = datetime.fromisoformat(parts[0].strip().replace('Z', '+00:00'))
+        except ValueError:
+            log_validation_failure(
+                'kafka',
+                [{'loc': ('event_time',), 'type': 'value_error', 'msg': 'Invalid event time'}],
+            )
+            return 'invalid'
+        inserted, errors = store.record_account_created(
+            user_id, event_time, topic, partition, offset
+        )
+        if inserted is None:
+            return 'invalid'
         if not store.get_profile(user_id):
             store.enqueue(user_id)
         return 'account'
     if event.startswith('recommendation request '):
-        store.record_course_request(topic, partition, offset, line)
+        try:
+            store.record_course_request(topic, partition, offset, line)
+        except ValidationError as error:
+            log_validation_failure(
+                'kafka',
+                error.errors(
+                    include_url=False, include_context=False, include_input=False
+                ),
+            )
+            return 'invalid'
         return 'recommendation'
     return 'ignored'
 
@@ -54,7 +76,7 @@ def main():
     try:
         while True:
             batch = consumer.poll(timeout_ms=1000)
-            counts = {'account': 0, 'recommendation': 0, 'ignored': 0}
+            counts = {'account': 0, 'recommendation': 0, 'invalid': 0, 'ignored': 0}
             for records in batch.values():
                 for record in records:
                     kind = handle_line(store, record.topic, record.partition, record.offset,
@@ -62,9 +84,11 @@ def main():
                     counts[kind] += 1
             if batch:
                 consumer.commit()
-            if counts['account'] or counts['recommendation']:
-                logger.info('course_events accounts=%d recommendations=%d',
-                            counts['account'], counts['recommendation'])
+            if counts['account'] or counts['recommendation'] or counts['invalid']:
+                logger.info(
+                    'course_events accounts=%d recommendations=%d invalid=%d',
+                    counts['account'], counts['recommendation'], counts['invalid'],
+                )
     finally:
         consumer.close()
 

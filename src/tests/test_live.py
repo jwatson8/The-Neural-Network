@@ -3,6 +3,7 @@ import unittest
 from datetime import UTC, datetime, timezone
 from unittest.mock import patch
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, create_engine
 
@@ -10,6 +11,7 @@ from deployment.traffic_report import summarize
 from src.database.interactions import (
     cold_start_profiles,
     course_requests,
+    data_quality_logs,
     llm_usage,
     recommendation_serves,
     stream_events,
@@ -63,6 +65,38 @@ class LiveTests(unittest.TestCase):
         self.assertEqual(usage.status, "succeeded")
         handle_line(reopened, "topic", 0, 1, line)
         self.assertIsNone(reopened.claim_next())
+
+    def test_invalid_account_event_is_logged_and_not_queued(self):
+        result = handle_line(
+            self.store, "topic", 0, 3, "2026-10-11T12:00:00Z,,GET /create_account"
+        )
+
+        self.assertEqual(result, "invalid")
+        self.assertIsNone(self.store.claim_next())
+        records = data_quality_logs.list_records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].source, "kafka")
+        self.assertNotIn("2026-10-11", str(records[0].error_details))
+
+    def test_invalid_event_time_is_logged_without_raw_line(self):
+        result = handle_line(
+            self.store, "topic", 0, 4, "not-a-date,501,GET /create_account"
+        )
+
+        self.assertEqual(result, "invalid")
+        records = data_quality_logs.list_records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].source, "kafka")
+        self.assertNotIn("not-a-date", str(records[0].error_details))
+
+    def test_event_database_failure_propagates_for_consumer_retry(self):
+        line = "2026-10-11T12:00:00Z,501,GET /create_account"
+        with patch(
+            "src.database.interactions.stream_events.create_many",
+            side_effect=SQLAlchemyError("database unavailable"),
+        ):
+            with self.assertRaises(SQLAlchemyError):
+                handle_line(self.store, "topic", 0, 5, line)
 
     def test_lookup_failure_schedules_retry_without_profile(self):
         self.store.enqueue("502")

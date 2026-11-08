@@ -101,6 +101,9 @@ class EvaluationTests(unittest.TestCase):
 
 class PipelineTests(unittest.TestCase):
     def setUp(self):
+        self.drift_logger_patch = patch("src.model_updates.daily.log_drift_result")
+        self.drift_logger = self.drift_logger_patch.start()
+        self.addCleanup(self.drift_logger_patch.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -145,10 +148,11 @@ class PipelineTests(unittest.TestCase):
         comparison = dict(groups={'all': {'users': 100}}, paired_delta_lower_95=.1, candidate_p95_ms=1)
         with patch('src.model_updates.daily.compare', return_value=comparison), \
              patch('src.model_updates.daily.detect_event_type_drift', return_value={'status': 'no_drift'}), \
-             patch('src.model_updates.daily.detect_rating_drift', return_value={'status': 'no_drift'}), \
+               patch('src.model_updates.daily.detect_rating_drift', return_value={'status': 'no_drift'}), \
              patch('src.model_updates.daily.fit', wraps=fit) as training:
             report = run(self.day, self.root, self.data, self.snapshot)
         self.assertEqual(report['status'], 'awaiting_approval')
+           self.assertEqual(self.drift_logger.call_count, 2)
         self.assertEqual(len(training.call_args_list[0].args[0]), 2)
         self.assertEqual(len(training.call_args_list[1].args[0]), 3)
         self.assertEqual(joblib.load(self.root/'model.joblib')['update_metadata']['version'], 'baseline')

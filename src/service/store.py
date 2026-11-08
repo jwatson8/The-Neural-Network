@@ -3,14 +3,17 @@
 import json
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from src.database.database import database_is_ready
 from src.database.interactions import (
     cold_start_jobs,
     cold_start_profiles,
     course_requests,
-    stream_events,
     users,
 )
+from src.data_quality.ingestion import persist_stream_event
+from src.data_quality.quality_logging import LogContext, log_validation_failure
 
 
 class ProfileStore:
@@ -50,13 +53,22 @@ class ProfileStore:
     def record_account_created(self, user_id, event_time, topic, partition, offset):
         from uuid import NAMESPACE_URL, uuid5
 
-        users.create_missing_many([{"user_id": user_id}])
-        return stream_events.create_many([{
-            "event_id": uuid5(NAMESPACE_URL, f"kafka:{topic}:{partition}:{offset}"),
+        event_id = uuid5(NAMESPACE_URL, f"kafka:{topic}:{partition}:{offset}")
+        context = LogContext(event_id=event_id)
+        try:
+            users.create_missing_many([{"user_id": user_id}])
+        except ValidationError as error:
+            errors = error.errors(
+                include_url=False, include_context=False, include_input=False
+            )
+            log_validation_failure("kafka", errors, context=context)
+            return None, errors
+        return persist_stream_event({
+            "event_id": event_id,
             "user_id": user_id,
             "event_type": "account_created",
             "event_time": event_time,
-        }])
+        }, context=context)
 
     def record_course_request(self, topic, partition_id, offset_id, line):
         return course_requests.create(
