@@ -4,12 +4,16 @@ import os
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
 from sqlalchemy import inspect as sqlalchemy_inspect
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.schema import CreateTable
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from src.database.database import get_database_url
@@ -17,14 +21,16 @@ from src.database.interactions import (
     RecordNotFoundError,
     cold_start_jobs,
     cold_start_profiles,
+    licensing_costs,
     llm_usage,
+    model_logs,
     movies,
     recommendation_serves,
     stream_events,
     user_movie_history,
     users,
 )
-from src.database.models import StreamEvent, User
+from src.database.models import LicensingCost, StreamEvent, User, UserMovieHistory
 from src.database.roll_up import roll_up
 from src.database.schemas import StreamEventCreate, UserCreate
 
@@ -51,11 +57,12 @@ class DatabaseInteractionTests(unittest.TestCase):
             movie_id="movie-1",
             title="Initial title",
             genres="Drama|Romance",
+            license_cost=Decimal("0.125"),
         )
 
     def test_schema_and_database_url_configuration(self):
         inspector = sqlalchemy_inspect(self.engine)
-        self.assertEqual(len(inspector.get_table_names()), 9)
+        self.assertEqual(len(inspector.get_table_names()), 12)
         self.assertEqual(
             inspector.get_pk_constraint("user_movie_history")["constrained_columns"],
             ["user_id", "movie_id"],
@@ -80,9 +87,6 @@ class DatabaseInteractionTests(unittest.TestCase):
             rating=8,
         )
         movies.update("movie-1", title="Updated", overview=None)
-        user_movie_history.upsert(
-            user_id="user-1", movie_id="movie-1", latest_rating=8
-        )
 
         self.assertEqual(movie.title, "Initial title")
         self.assertEqual(event.rating, 8)
@@ -92,6 +96,355 @@ class DatabaseInteractionTests(unittest.TestCase):
         )
         with self.assertRaises(RecordNotFoundError):
             users.update("missing", age=20)
+
+    def test_get_user_history_returns_only_requested_users_rows(self):
+        self.seed_catalog()
+        movies.create(movie_id="movie-2", title="Second movie")
+        movies.create(movie_id="movie-3", title="Third movie")
+        users.create(user_id="user-2")
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-2",
+            event_type="rating",
+            event_time=self.now,
+            rating=7,
+        )
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            event_time=self.now,
+            rating=9,
+        )
+        stream_events.create(
+            user_id="user-2",
+            movie_id="movie-3",
+            event_type="rating",
+            event_time=self.now,
+            rating=5,
+        )
+
+        history = user_movie_history.get_user_history("user-1")
+
+        self.assertEqual([row.movie_id for row in history], ["movie-1", "movie-2"])
+        self.assertEqual([row.latest_rating for row in history], [9, 7])
+        self.assertTrue(all(row.user_id == "user-1" for row in history))
+        self.assertEqual(user_movie_history.get_user_history("missing"), [])
+
+    def test_history_tracks_latest_watch_rating_and_rating_change(self):
+        self.seed_catalog()
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="watch",
+            event_time=start,
+            minute_index=12,
+        )
+        watch = user_movie_history.get("user-1", "movie-1")
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            rating=7,
+            event_time=start + timedelta(minutes=1),
+        )
+        first_rating = user_movie_history.get("user-1", "movie-1")
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            rating=7,
+            event_time=start + timedelta(minutes=2),
+        )
+        same_rating = user_movie_history.get("user-1", "movie-1")
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            rating=9,
+            event_time=start + timedelta(minutes=3),
+        )
+        changed_rating = user_movie_history.get("user-1", "movie-1")
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="watch",
+            event_time=start + timedelta(minutes=4),
+        )
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            event_time=start - timedelta(minutes=1),
+            rating=2,
+        )
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            event_time=start + timedelta(minutes=3),
+            rating=4,
+        )
+        history = user_movie_history.get("user-1", "movie-1")
+
+        self.assertIsNone(watch.latest_rating)
+        self.assertFalse(first_rating.rating_changed)
+        self.assertFalse(same_rating.rating_changed)
+        self.assertTrue(changed_rating.rating_changed)
+        self.assertEqual(history.latest_rating, 9)
+        self.assertTrue(history.rating_changed)
+        self.assertEqual(
+            history.last_recorded_watch_at.replace(tzinfo=UTC),
+            start + timedelta(minutes=4),
+        )
+        self.assertEqual(
+            history.last_recorded_rating_at.replace(tzinfo=UTC),
+            start + timedelta(minutes=3),
+        )
+        self.assertEqual(len(stream_events.list_records()), 7)
+
+    def test_history_batch_is_ordered_and_duplicate_events_are_ignored(self):
+        self.seed_catalog()
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+        records = [
+            {
+                "event_id": uuid4(),
+                "user_id": "user-1",
+                "movie_id": "movie-1",
+                "event_type": "rating",
+                "event_time": start + timedelta(minutes=3),
+                "rating": 9,
+            },
+            {
+                "event_id": uuid4(),
+                "user_id": "user-1",
+                "movie_id": "movie-1",
+                "event_type": "watch",
+                "event_time": start + timedelta(minutes=2),
+            },
+            {
+                "event_id": uuid4(),
+                "user_id": "user-1",
+                "movie_id": "movie-1",
+                "event_type": "rating",
+                "event_time": start + timedelta(minutes=1),
+                "rating": 5,
+            },
+        ]
+
+        self.assertEqual(stream_events.create_many(records), 3)
+        self.assertEqual(stream_events.create_many(records), 0)
+        history = user_movie_history.get("user-1", "movie-1")
+
+        self.assertEqual(history.latest_rating, 9)
+        self.assertTrue(history.rating_changed)
+        self.assertEqual(
+            history.last_recorded_watch_at.replace(tzinfo=UTC),
+            start + timedelta(minutes=2),
+        )
+
+        movies.create(movie_id="movie-2", title="Second movie")
+        duplicate_id = uuid4()
+        duplicate_records = [
+            {
+                "event_id": duplicate_id,
+                "user_id": "user-1",
+                "movie_id": "movie-2",
+                "event_type": "rating",
+                "event_time": start,
+                "rating": 4,
+            },
+            {
+                "event_id": duplicate_id,
+                "user_id": "user-1",
+                "movie_id": "movie-2",
+                "event_type": "rating",
+                "event_time": start + timedelta(minutes=5),
+                "rating": 10,
+            },
+        ]
+        self.assertEqual(stream_events.create_many(duplicate_records), 1)
+        self.assertEqual(
+            user_movie_history.get("user-1", "movie-2").latest_rating, 4
+        )
+
+    def test_watch_charges_use_a_sliding_24_hour_inactivity_window(self):
+        self.seed_catalog()
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+
+        first_event = stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="watch",
+            event_time=start,
+        )
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="watch",
+            event_time=start + timedelta(hours=12),
+        )
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="watch",
+            event_time=start + timedelta(hours=24),
+        )
+        boundary_event = stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="watch",
+            event_time=start + timedelta(hours=48),
+        )
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="watch",
+            event_time=start + timedelta(hours=47),
+        )
+
+        charges = licensing_costs.list_records()
+        self.assertEqual(len(charges), 2)
+        self.assertEqual(
+            {charge.source_event_id for charge in charges},
+            {first_event.event_id, boundary_event.event_id},
+        )
+        self.assertTrue(
+            all(charge.license_cost == Decimal("0.125") for charge in charges)
+        )
+
+    def test_charges_snapshot_cost_and_preserve_missing_cost(self):
+        self.seed_catalog()
+        movies.create(movie_id="movie-2", title="No cost")
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="watch",
+            event_time=start,
+        )
+        movies.update("movie-1", license_cost=Decimal("0.5"))
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="watch",
+            event_time=start + timedelta(hours=24),
+        )
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-2",
+            event_type="watch",
+            event_time=start,
+        )
+
+        movie_one_charges = licensing_costs.search(
+            user_id="user-1", movie_id="movie-1"
+        ).records
+        movie_two_charge = licensing_costs.search(movie_id="movie-2").records[0]
+        self.assertEqual(
+            [charge.license_cost for charge in movie_one_charges],
+            [Decimal("0.5"), Decimal("0.125")],
+        )
+        self.assertIsNone(movie_two_charge.license_cost)
+
+    def test_only_new_watch_events_create_charges(self):
+        self.seed_catalog()
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+        watch_id = uuid4()
+        events = [
+            {
+                "event_id": watch_id,
+                "user_id": "user-1",
+                "movie_id": "movie-1",
+                "event_type": "watch",
+                "event_time": start,
+            },
+            {
+                "event_id": uuid4(),
+                "user_id": "user-1",
+                "movie_id": "movie-1",
+                "event_type": "rating",
+                "event_time": start + timedelta(hours=1),
+                "rating": 8,
+            },
+        ]
+
+        self.assertEqual(stream_events.create_many(reversed(events)), 2)
+        self.assertEqual(stream_events.create_many(events), 0)
+        charges = licensing_costs.list_records()
+        self.assertEqual(len(charges), 1)
+        self.assertEqual(charges[0].source_event_id, watch_id)
+
+    def test_stream_event_and_history_update_roll_back_together(self):
+        self.seed_catalog()
+        event_id = uuid4()
+        with patch(
+            "src.database.interactions.user_movie_history._apply_event_to_history",
+            side_effect=RuntimeError("history unavailable"),
+        ):
+            with self.assertRaises(RuntimeError):
+                stream_events.create(
+                    event_id=event_id,
+                    user_id="user-1",
+                    movie_id="movie-1",
+                    event_type="watch",
+                    event_time=self.now,
+                )
+
+        self.assertIsNone(stream_events.get(event_id))
+        self.assertIsNone(user_movie_history.get("user-1", "movie-1"))
+
+    def test_charge_failure_rolls_back_event_and_history(self):
+        self.seed_catalog()
+        event_id = uuid4()
+        with patch(
+            "src.database.interactions.licensing_costs._record_watch_charge",
+            side_effect=RuntimeError("charge unavailable"),
+        ):
+            with self.assertRaises(RuntimeError):
+                stream_events.create(
+                    event_id=event_id,
+                    user_id="user-1",
+                    movie_id="movie-1",
+                    event_type="watch",
+                    event_time=self.now,
+                )
+
+        self.assertIsNone(stream_events.get(event_id))
+        self.assertIsNone(user_movie_history.get("user-1", "movie-1"))
+        self.assertEqual(licensing_costs.list_records(), [])
+
+    def test_history_database_constraints_reject_empty_activity(self):
+        with Session(self.engine) as session:
+            session.add(UserMovieHistory(user_id="user-1", movie_id="movie-1"))
+            with self.assertRaises(IntegrityError):
+                session.commit()
+
+    def test_history_postgres_ddl_uses_event_timestamps(self):
+        ddl = str(
+            CreateTable(UserMovieHistory.__table__).compile(
+                dialect=postgresql.dialect()
+            )
+        )
+
+        self.assertIn("last_recorded_watch_at TIMESTAMP WITH TIME ZONE", ddl)
+        self.assertIn("last_recorded_rating_at TIMESTAMP WITH TIME ZONE", ddl)
+        self.assertIn("ck_history_rating_state", ddl)
+        self.assertNotIn("stored_at", ddl)
+
+    def test_licensing_cost_postgres_ddl_uses_charge_timestamp(self):
+        ddl = str(
+            CreateTable(LicensingCost.__table__).compile(
+                dialect=postgresql.dialect()
+            )
+        )
+
+        self.assertIn("charged_at TIMESTAMP WITH TIME ZONE", ddl)
+        self.assertIn("UNIQUE (source_event_id)", ddl)
+        self.assertIn("ck_licensing_cost_non_negative", ddl)
 
     def test_raw_csv_event_normalization_and_validation(self):
         event = StreamEventCreate.model_validate(
@@ -372,8 +725,8 @@ class DatabaseInteractionTests(unittest.TestCase):
 
     def test_public_functions_are_documented_and_hide_sessions(self):
         modules = (
-            users, movies, stream_events, user_movie_history,
-            recommendation_serves, llm_usage, cold_start_profiles,
+            users, movies, stream_events, user_movie_history, licensing_costs,
+            recommendation_serves, llm_usage, model_logs, cold_start_profiles,
             cold_start_jobs,
         )
         functions = [getattr(module, name) for module in modules for name in module.__all__]
@@ -415,9 +768,20 @@ class DatabaseInteractionTests(unittest.TestCase):
         )
         self.assertEqual(first["events_inserted"], 2)
         self.assertEqual(second["events_inserted"], 0)
-        self.assertEqual(user_movie_history.get("1", "movie-1").latest_rating, 8)
+        history = user_movie_history.get("1", "movie-1")
+        self.assertEqual(history.latest_rating, 8)
+        self.assertFalse(history.rating_changed)
+        self.assertEqual(
+            history.last_recorded_watch_at, datetime(2025, 1, 1, 0, 0)
+        )
+        self.assertEqual(
+            history.last_recorded_rating_at, datetime(2025, 1, 1, 0, 1)
+        )
         with Session(self.engine) as session:
             self.assertEqual(len(session.exec(select(StreamEvent)).all()), 2)
+            charges = list(session.exec(select(LicensingCost)).all())
+            self.assertEqual(len(charges), 1)
+            self.assertEqual(charges[0].license_cost, Decimal("0.1"))
 
 
 if __name__ == "__main__":

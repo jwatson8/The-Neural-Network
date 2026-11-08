@@ -1,11 +1,11 @@
 """Immutable stream-event interactions."""
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from src.database.interactions._pagination import (
     SearchCursor,
@@ -21,7 +21,7 @@ from src.database.interactions._shared import (
 from src.database.interactions._shared import (
     list_records as list_model_records,
 )
-from src.database.models import StreamEvent
+from src.database.models import StreamEvent, User, UserMovieHistory
 from src.database.schemas import StreamEventCreate
 
 __all__ = ["create", "get", "list_records", "create_many", "search"]
@@ -30,8 +30,55 @@ __all__ = ["create", "get", "list_records", "create_many", "search"]
 ### ----------- Helper Functions -----------
 
 
+def _lock_watch_users(
+    session: Session, events: Iterable[StreamEvent | StreamEventCreate]
+) -> None:
+    user_ids = sorted(
+        {event.user_id for event in events if event.event_type == "watch"}
+    )
+    if not user_ids:
+        return
+    statement = (
+        select(User)
+        .where(User.user_id.in_(user_ids))
+        .order_by(User.user_id)
+        .with_for_update()
+    )
+    session.exec(statement).all()
+
+
+def _utc_event_time(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _materialize_event(session: Session, event: StreamEvent) -> None:
+    from src.database.interactions.user_movie_history import _apply_event_to_history
+
+    previous_watch_at = None
+    if event.event_type == "watch":
+        history = session.get(UserMovieHistory, (event.user_id, event.movie_id))
+        if history is not None:
+            previous_watch_at = history.last_recorded_watch_at
+
+    _apply_event_to_history(session, event)
+    should_charge = event.event_type == "watch" and (
+        previous_watch_at is None
+        or _utc_event_time(event.event_time)
+        >= _utc_event_time(previous_watch_at) + timedelta(hours=24)
+    )
+    if should_charge:
+        from src.database.interactions.licensing_costs import _record_watch_charge
+
+        _record_watch_charge(session, event)
+
+
 def _create(session: Session, data: StreamEventCreate) -> StreamEvent:
-    return create_record(session, StreamEvent, schema_values(data))
+    _lock_watch_users(session, [data])
+    event = create_record(session, StreamEvent, schema_values(data))
+    _materialize_event(session, event)
+    return event
 
 
 def _get(session: Session, event_id: UUID) -> StreamEvent | None:
@@ -86,6 +133,7 @@ def _search(
 def _create_many(session: Session, records: list[StreamEventCreate]) -> int:
     if not records:
         return 0
+    _lock_watch_users(session, records)
     values = [record.model_dump() for record in records]
     for event in values:
         event["event_id"] = event["event_id"] or uuid4()
@@ -95,8 +143,22 @@ def _create_many(session: Session, records: list[StreamEventCreate]) -> int:
             StreamEvent.event_id
         )
     )
+    inserted_ids = set(result.scalars().all())
     session.flush()
-    return len(result.scalars().all())
+    materialized_ids = set()
+    inserted_events = []
+    for event in values:
+        event_id = event["event_id"]
+        if event_id in inserted_ids and event_id not in materialized_ids:
+            inserted_events.append(StreamEvent.model_construct(**event))
+            materialized_ids.add(event_id)
+    inserted_events = sorted(
+        inserted_events,
+        key=lambda record: (record.event_time, record.event_id.int),
+    )
+    for event in inserted_events:
+        _materialize_event(session, event)
+    return len(inserted_ids)
 
 
 ### ----------- Individual Functions -----------
