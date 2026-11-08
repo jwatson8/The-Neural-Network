@@ -18,6 +18,11 @@ Open `http://localhost:3000` and sign in as `GRAFANA_ADMIN_USER` (default
 `admin`) using `GRAFANA_ADMIN_PASSWORD`. The database reader password is only
 used by provisioned services and is never entered in the Grafana UI.
 
+The Monitoring Overview dashboard includes an application table-count panel. It
+queries Flask's `GET /database/summary` endpoint over the Compose network through
+the provisioned Infinity datasource; it does not expand the PostgreSQL reader's
+permissions beyond the monitoring tables.
+
 View service logs with:
 
 ```sh
