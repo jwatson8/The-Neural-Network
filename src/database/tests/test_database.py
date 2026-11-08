@@ -17,6 +17,8 @@ from src.database.interactions import (
     RecordNotFoundError,
     cold_start_jobs,
     cold_start_profiles,
+    course_requests,
+    database_summary,
     llm_usage,
     movies,
     recommendation_serves,
@@ -55,7 +57,7 @@ class DatabaseInteractionTests(unittest.TestCase):
 
     def test_schema_and_database_url_configuration(self):
         inspector = sqlalchemy_inspect(self.engine)
-        self.assertEqual(len(inspector.get_table_names()), 8)
+        self.assertEqual(len(inspector.get_table_names()), 9)
         self.assertEqual(
             inspector.get_pk_constraint("user_movie_history")["constrained_columns"],
             ["user_id", "movie_id"],
@@ -307,6 +309,33 @@ class DatabaseInteractionTests(unittest.TestCase):
         self.assertEqual(movies.get("movie-2").title, "New title")
         self.assertEqual(users.create_missing_many([]), [])
 
+    def test_course_requests_are_deduplicated_by_kafka_offset(self):
+        record = {
+            "topic": "course-logs",
+            "partition_id": 2,
+            "offset_id": 19,
+            "raw_line": "2026-10-11T12:00:00Z,501,GET /create_account",
+        }
+
+        self.assertTrue(course_requests.create(**record))
+        self.assertFalse(course_requests.create(**record))
+        self.assertEqual(
+            len(course_requests.list_records(limit=10)),
+            1,
+        )
+
+    def test_database_summary_counts_all_tables(self):
+        self.seed_catalog()
+        counts = database_summary.counts()
+
+        self.assertEqual(counts["users"], 1)
+        self.assertEqual(counts["movies"], 1)
+        self.assertEqual(set(counts), {
+            "users", "movies", "stream_events", "course_requests",
+            "user_movie_history", "recommendation_serves", "llm_usage",
+            "cold_start_profiles", "cold_start_jobs",
+        })
+
     def test_create_missing_batches_reject_invalid_or_duplicate_ids_atomically(self):
         with self.assertRaisesRegex(ValueError, "Duplicate user_id values: duplicate"):
             users.create_missing_many(
@@ -351,6 +380,7 @@ class DatabaseInteractionTests(unittest.TestCase):
             status="succeeded",
         )
         cold_start_jobs.enqueue(user_id="user-1")
+        self.assertIsNotNone(cold_start_jobs.get("user-1"))
         claimed = cold_start_jobs.claim(lease_seconds=30)
         cold_start_profiles.complete_generation(
             user_id="user-1",
@@ -374,7 +404,7 @@ class DatabaseInteractionTests(unittest.TestCase):
         modules = (
             users, movies, stream_events, user_movie_history,
             recommendation_serves, llm_usage, cold_start_profiles,
-            cold_start_jobs,
+            cold_start_jobs, course_requests, database_summary,
         )
         functions = [getattr(module, name) for module in modules for name in module.__all__]
         for function in functions:

@@ -51,7 +51,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      PROFILE_VOLUME_NAME: ci-profiles
       POSTGRES_PASSWORD: ci-only-not-a-production-secret
       BIND_ADDRESS: 127.0.0.1
     steps:

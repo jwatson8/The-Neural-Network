@@ -75,6 +75,20 @@ class StreamEvent(SQLModel, table=True):
     rating: float | None = Field(default=None, ge=1, le=10)
 
 
+class CourseRequest(SQLModel, table=True):
+    __tablename__ = "course_requests"
+    __table_args__ = (
+        CheckConstraint("partition_id >= 0", name="ck_course_request_partition"),
+        CheckConstraint("offset_id >= 0", name="ck_course_request_offset"),
+    )
+
+    topic: str = Field(primary_key=True, max_length=255)
+    partition_id: int = Field(primary_key=True, ge=0)
+    offset_id: int = Field(primary_key=True, ge=0)
+    received_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False, index=True)
+    raw_line: str = Field(sa_type=Text, nullable=False)
+
+
 class UserMovieHistory(SQLModel, table=True):
     __tablename__ = "user_movie_history"
     __table_args__ = (

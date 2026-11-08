@@ -23,8 +23,10 @@ and ``RecordNotFoundError`` identifies updates of missing records.
 """
 
 from src.database.interactions import (
+    course_requests,
     cold_start_jobs,
     cold_start_profiles,
+    database_summary,
     llm_usage,
     movies,
     recommendation_serves,
@@ -39,8 +41,10 @@ __all__ = [
     "RecordNotFoundError",
     "SearchCursor",
     "SearchPage",
+    "course_requests",
     "cold_start_jobs",
     "cold_start_profiles",
+    "database_summary",
     "llm_usage",
     "movies",
     "recommendation_serves",

@@ -54,7 +54,7 @@ it first rather than overwriting the active artifact. Record the source commit a
 ## 2. Test on an alternate port before switching production
 
 ```sh
-sudo env PORT=18082 BIND_ADDRESS=127.0.0.1 PROFILE_VOLUME_NAME=neural-network-staging-profiles docker compose -p neural-network-staging up -d --wait --wait-timeout 120
+sudo env PORT=18082 BIND_ADDRESS=127.0.0.1 docker compose -p neural-network-staging up -d --wait --wait-timeout 120
 sudo docker compose -p neural-network-staging exec -T api python deployment/smoke_test.py
 curl --fail --max-time 0.6 http://127.0.0.1:18082/recommend/1
 ```
@@ -79,9 +79,17 @@ sudo docker compose -p neural-network-staging stop
 
 Keep the old image, checkout and model for rollback. If other old workers are
 running, coordinate stopping them before enabling the new workers to avoid duplicate
-consumers/profile generation. The default named volume reuses the smoke deployment's
-`neural-network-smoke_smoke-profiles`; schema additions preserve its profiles and jobs.
-Do not delete volumes or run old and new APIs on the same port.
+consumers/profile generation. Live profiles, jobs, recommendation audits, LLM usage,
+and Kafka evidence are stored in the Compose PostgreSQL volume. Existing generated
+profiles/jobs in the legacy SQLite volume are not imported; the checked-in seed
+profiles are loaded into PostgreSQL on API startup. Do not delete the PostgreSQL
+volume or run old and new APIs on the same port.
+
+Normal Compose startup creates the schema, runs the idempotent CSV roll-up for users,
+movies, source events, and user/movie history, then starts the API. Recommendation
+audits and queued jobs are written by API requests; generated profiles and LLM usage
+require worker activity; Kafka request evidence and account events require Kafka
+traffic. Those event-driven tables are expected to start empty on a fresh deployment.
 
 From Windows PowerShell outside SSH, verify external reachability:
 
@@ -146,8 +154,8 @@ failures. Status 200 determines course success. Personalized successes additiona
 match API audit records by user, exact movie list and timestamp within 120 seconds;
 one audit record can match only once. Unmatched records are not called personalized.
 Targets are >=2,000 successes and personalized successes >=10% of all requests.
-The course logs remain authoritative. Monitor VM disk usage; SQLite evidence is
-retained for M1 and needs an archiving/retention policy for long-term operation.
+The course logs remain authoritative. Monitor PostgreSQL disk usage and define a
+retention/archiving policy for captured Kafka evidence.
 
 ## Rollback
 
@@ -160,8 +168,8 @@ curl --fail --max-time 2 http://127.0.0.1:8082/health
 ```
 
 Rollback restores the previous API but does not provide the new live-worker
-features. Never use `down -v` as a restart command. Take a consistent SQLite backup
-before future incompatible schema changes; this PR only adds tables/indexes.
+features. Never use `down -v` as a restart command. Take a PostgreSQL backup before
+future incompatible schema changes; this release adds tables/indexes.
 
 ## What has been verified
 

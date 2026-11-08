@@ -2,6 +2,7 @@
 import logging
 import os
 import re
+from datetime import datetime
 
 from kafka import KafkaConsumer
 from src.service.store import ProfileStore
@@ -15,6 +16,8 @@ def handle_line(store, topic, partition, offset, line):
         return 'ignored'
     _, user_id, event = [part.strip() for part in parts]
     if re.fullmatch(r'GET /create_account/?(?:\s+HTTP/\S+)?', event):
+        event_time = datetime.fromisoformat(parts[0].strip().replace('Z', '+00:00'))
+        store.record_account_created(user_id, event_time, topic, partition, offset)
         if not store.get_profile(user_id):
             store.enqueue(user_id)
         return 'account'
@@ -29,7 +32,7 @@ def main():
     for key in ('KAFKA_BOOTSTRAP_SERVERS', 'KAFKA_TOPIC', 'KAFKA_GROUP_ID'):
         if not os.getenv(key):
             raise ValueError(f'Set {key} before enabling the course stream')
-    store = ProfileStore(os.environ['PROFILE_DB_PATH'])
+    store = ProfileStore()
     options = dict(
         bootstrap_servers=os.environ['KAFKA_BOOTSTRAP_SERVERS'].split(','),
         group_id=os.environ['KAFKA_GROUP_ID'],

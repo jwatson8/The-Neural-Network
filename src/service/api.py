@@ -2,14 +2,21 @@
 
 import logging
 import os
-import sqlite3
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import joblib
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request
+from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.exceptions import HTTPException
 
+from src.database.interactions import (
+    cold_start_jobs,
+    database_summary,
+    recommendation_serves,
+    users,
+)
 from src.service.cold_start import recommend_cold_start
 from src.service.model_adapter import recommend, validate_model
 from src.service.store import ProfileStore
@@ -26,7 +33,6 @@ def create_app(model=None, profile_store=None, config=None):
             str(Path(__file__).resolve().parents[2] / 'artifacts' / 'model.joblib'),
         ),
         MODEL_VERSION=os.getenv('MODEL_VERSION', 'unknown'),
-        PROFILE_DB_PATH=os.getenv('PROFILE_DB_PATH', 'state/profiles.sqlite3'),
         PROFILE_SEED_PATH=os.getenv('PROFILE_SEED_PATH', str(Path(__file__).resolve().parents[1] / 'model' / 'llm_profiles.json')),
     )
     if config:
@@ -39,9 +45,12 @@ def create_app(model=None, profile_store=None, config=None):
     if model is not None:
         validate_model(model)
 
-    store = profile_store or ProfileStore(app.config['PROFILE_DB_PATH'])
+    store = profile_store or ProfileStore()
     if profile_store is None:
-        store.seed_profiles(app.config['PROFILE_SEED_PATH'])
+        try:
+            store.seed_profiles(app.config['PROFILE_SEED_PATH'])
+        except Exception as error:
+            logger.warning('profile_seed_failed error_type=%s', type(error).__name__)
     app.extensions['recommendation_model'] = model
     app.extensions['profile_store'] = store
 
@@ -63,11 +72,51 @@ def create_app(model=None, profile_store=None, config=None):
             ready = False
         return jsonify(status='ok' if ready else 'not_ready'), 200 if ready else 503
 
+    @app.get('/database/summary')
+    def public_database_summary():
+        return jsonify(tables=database_summary.counts())
+
+    @app.get('/database/cold-start-jobs')
+    def public_cold_start_jobs():
+        try:
+            offset = int(request.args.get('offset', '0'))
+            limit = int(request.args.get('limit', '50'))
+        except ValueError:
+            return jsonify(error='Bad Request', message='offset and limit must be integers'), 400
+        status = request.args.get('status') or None
+        if offset < 0 or not 1 <= limit <= 100:
+            return jsonify(error='Bad Request', message='offset must be non-negative and limit must be between 1 and 100'), 400
+        if status not in (None, 'pending', 'processing'):
+            return jsonify(error='Bad Request', message='status must be pending or processing'), 400
+
+        records = cold_start_jobs.list_records(
+            status=status, offset=offset, limit=limit + 1
+        )
+        has_more = len(records) > limit
+        jobs = records[:limit]
+        return jsonify(
+            jobs=[
+                {
+                    'status': job.status,
+                    'attempts': job.attempts,
+                    'next_attempt_at': job.next_attempt_at.isoformat(),
+                    'lease_until': job.lease_until.isoformat() if job.lease_until else None,
+                    'created_at': job.created_at.isoformat(),
+                    'updated_at': job.updated_at.isoformat(),
+                }
+                for job in jobs
+            ],
+            offset=offset,
+            limit=limit,
+            has_more=has_more,
+        )
+
     @app.get('/recommend/<string:user_id>')
     def recommendation(user_id):
         if not user_id.strip():
             return jsonify(error='Bad Request', message='user_id must not be blank'), 400
 
+        request_received_at = datetime.now(UTC)
         started = time.perf_counter()
         loaded_model = app.extensions['recommendation_model']
         if loaded_model is None:
@@ -78,23 +127,35 @@ def create_app(model=None, profile_store=None, config=None):
         else:
             try:
                 result = recommend_cold_start(loaded_model, store, user_id, k=20)
-            except sqlite3.Error:
+            except (SQLAlchemyError, RuntimeError) as error:
                 result = None
-                logger.warning('cold_start_store_read_failed user_id=%s', user_id)
+                logger.warning('cold_start_store_read_failed user_id=%s error_type=%s', user_id, type(error).__name__)
             if result is None:
                 movie_ids, route = recommend(loaded_model, user_id, k=20)
                 try:
                     store.enqueue(user_id)
-                except sqlite3.Error:
-                    logger.warning('profile_job_enqueue_failed user_id=%s', user_id)
+                except (SQLAlchemyError, RuntimeError) as error:
+                    logger.warning('profile_job_enqueue_failed user_id=%s error_type=%s', user_id, type(error).__name__)
             else:
                 movie_ids, route = result
 
-        try:
-            store.record_response(user_id, movie_ids, route)
-        except sqlite3.Error:
-            logger.warning('response_audit_failed user_id=%s', user_id)
         elapsed_ms = (time.perf_counter() - started) * 1000
+        try:
+            users.create_missing_many([{'user_id': user_id}])
+            recommendation_serves.create(
+                user_id=user_id,
+                served_at=datetime.now(UTC),
+                model_route=route,
+                model_version=app.config['MODEL_VERSION'],
+                recommendations=[{'movie_id': movie_id} for movie_id in movie_ids],
+                request_received_at=request_received_at,
+                serve_duration_ms=elapsed_ms,
+            )
+        except Exception as error:
+            logger.warning(
+                'recommendation_db_audit_failed user_id=%s error_type=%s',
+                user_id, type(error).__name__,
+            )
         logger.info(
             'recommendation user_id=%s route=%s model_version=%s duration_ms=%.2f status=200',
             user_id, route, app.config['MODEL_VERSION'], elapsed_ms,

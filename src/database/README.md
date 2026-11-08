@@ -7,9 +7,10 @@ and Psycopg.
 
 ## Organization
 
-The database is organized by table and table-specific interactions. There are 8 tables:
+The database is organized by table and table-specific interactions. There are 9 tables:
 
-`stream_events`, `user_movie_history`, `recommendation_serves`, `users`, `llm_usage`, `movies`, `cold_start_jobs`, and `cold_start_profiles`.
+`stream_events`, `course_requests`, `user_movie_history`, `recommendation_serves`,
+`users`, `llm_usage`, `movies`, `cold_start_jobs`, and `cold_start_profiles`.
 
 Each table has a corresponding module under `src/database/interactions`. Public
 functions validate inputs through `schemas.py`, own their database transaction, and
@@ -66,8 +67,8 @@ function returns the number of newly inserted events.
 
 ## Search Functionality
 
-The append-only tables are `stream_events`, `recommendation_serves`, and
-`llm_usage`.
+The append-only tables are `stream_events`, `course_requests`,
+`recommendation_serves`, and `llm_usage`.
 
 Immutable interaction records can be searched in bounded pages. One intended use is
 a daily incremental job. In that case, use the stream event storage time so late
@@ -130,8 +131,11 @@ report includes created counts and skipped IDs. Live services and Kafka consumer
 must use the interaction API instead.
 
 ```sh
-docker compose --profile tools run --rm database-roll-up
+docker compose run --rm database-roll-up
 ```
+
+Normal Compose startup runs this idempotent roll-up before starting the API. Running
+the command manually is useful for backfills or verifying a standalone database.
 
 ## Running in Production
 
@@ -154,8 +158,9 @@ python -m unittest discover -s src/database/tests -v
 bootstrap. Use a migration tool such as Alembic before making production schema
 changes.
 
-## Left to Add
+## Service Integration
 
-Flask currently uses SQLite for the cold-start workflow. The PostgreSQL
-`cold_start_jobs` and `cold_start_profiles` interactions are implemented but have not
-yet been integrated into the Flask service.
+The Flask API, profile worker, and Kafka consumer use the PostgreSQL interaction
+functions for profiles, jobs, recommendation serves, LLM usage, stream events, and
+raw course-request evidence. Kafka request rows are deduplicated by topic, partition,
+and offset so a replay after a failed commit does not duplicate evidence.
