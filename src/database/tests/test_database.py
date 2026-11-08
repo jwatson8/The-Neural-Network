@@ -18,6 +18,7 @@ from src.database.interactions import (
     cold_start_jobs,
     cold_start_profiles,
     llm_usage,
+    model_logs,
     movies,
     recommendation_serves,
     stream_events,
@@ -55,7 +56,7 @@ class DatabaseInteractionTests(unittest.TestCase):
 
     def test_schema_and_database_url_configuration(self):
         inspector = sqlalchemy_inspect(self.engine)
-        self.assertEqual(len(inspector.get_table_names()), 9)
+        self.assertEqual(len(inspector.get_table_names()), 10)
         self.assertEqual(
             inspector.get_pk_constraint("user_movie_history")["constrained_columns"],
             ["user_id", "movie_id"],
@@ -395,7 +396,7 @@ class DatabaseInteractionTests(unittest.TestCase):
     def test_public_functions_are_documented_and_hide_sessions(self):
         modules = (
             users, movies, stream_events, user_movie_history,
-            recommendation_serves, llm_usage, cold_start_profiles,
+            recommendation_serves, llm_usage, model_logs, cold_start_profiles,
             cold_start_jobs,
         )
         functions = [getattr(module, name) for module in modules for name in module.__all__]

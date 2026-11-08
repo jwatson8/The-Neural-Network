@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from math import isnan
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import ConfigDict, FiniteFloat, field_validator, model_validator
@@ -33,6 +33,48 @@ class DataQualityLogCreate(DatabaseSchema):
                 raise ValueError("occurred_at must include a timezone")
             self.occurred_at = self.occurred_at.astimezone(UTC)
         return self
+
+
+class ModelLogCreateBase(DatabaseSchema):
+    log_id: UUID | None = None
+    model_name: str = Field(min_length=1, max_length=255)
+    occurred_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def normalize_occurred_at(self):
+        if self.occurred_at is not None:
+            if self.occurred_at.utcoffset() is None:
+                raise ValueError("occurred_at must include a timezone")
+            self.occurred_at = self.occurred_at.astimezone(UTC)
+        return self
+
+
+class ModelTrainingLogCreate(ModelLogCreateBase):
+    event_type: Literal["train"] = "train"
+    training_data_source: Literal["stream_events", "user_movie_history"]
+    training_data_start_at: datetime
+    training_data_end_at: datetime
+    training_row_count: int = Field(ge=0)
+    model_size_bytes: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_training_window(self):
+        for field_name in ("training_data_start_at", "training_data_end_at"):
+            value = getattr(self, field_name)
+            if value.utcoffset() is None:
+                raise ValueError(f"{field_name} must include a timezone")
+            setattr(self, field_name, value.astimezone(UTC))
+        if self.training_data_end_at <= self.training_data_start_at:
+            raise ValueError(
+                "training_data_end_at must be later than training_data_start_at"
+            )
+        return self
+
+
+class ModelTestLogCreate(ModelLogCreateBase):
+    event_type: Literal["test"] = "test"
+    test_type: str = Field(min_length=1, max_length=100)
+    test_result: dict[str, Any] = Field(min_length=1)
 
 
 class UserCreate(DatabaseSchema):

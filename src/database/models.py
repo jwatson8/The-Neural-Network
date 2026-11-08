@@ -15,6 +15,9 @@ def utc_now() -> datetime:
 
 
 JSON_DOCUMENT = JSONB().with_variant(JSON(), "sqlite")
+NULLABLE_JSON_DOCUMENT = JSONB(none_as_null=True).with_variant(
+    JSON(none_as_null=True), "sqlite"
+)
 
 
 class DataQualityLog(SQLModel, table=True):
@@ -32,6 +35,68 @@ class DataQualityLog(SQLModel, table=True):
     movie_id: str | None = Field(default=None, max_length=255, index=True)
     event_id: UUID | None = Field(default=None, index=True)
     request_id: UUID | None = Field(default=None, index=True)
+
+
+class ModelLog(SQLModel, table=True):
+    __tablename__ = "model_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('train', 'test')",
+            name="ck_model_log_event_type",
+        ),
+        CheckConstraint(
+            "training_data_source IS NULL OR "
+            "training_data_source IN ('stream_events', 'user_movie_history')",
+            name="ck_model_log_training_source",
+        ),
+        CheckConstraint(
+            "training_data_end_at IS NULL OR training_data_start_at IS NULL OR "
+            "training_data_end_at > training_data_start_at",
+            name="ck_model_log_training_window",
+        ),
+        CheckConstraint(
+            "training_row_count IS NULL OR training_row_count >= 0",
+            name="ck_model_log_training_row_count",
+        ),
+        CheckConstraint(
+            "model_size_bytes IS NULL OR model_size_bytes >= 0",
+            name="ck_model_log_model_size",
+        ),
+        CheckConstraint(
+            "(event_type = 'train' AND training_data_source IS NOT NULL AND "
+            "training_data_start_at IS NOT NULL AND training_data_end_at IS NOT NULL AND "
+            "training_row_count IS NOT NULL AND test_type IS NULL AND test_result IS NULL) OR "
+            "(event_type = 'test' AND training_data_source IS NULL AND "
+            "training_data_start_at IS NULL AND training_data_end_at IS NULL AND "
+            "training_row_count IS NULL AND model_size_bytes IS NULL AND "
+            "test_type IS NOT NULL AND test_result IS NOT NULL)",
+            name="ck_model_log_event_shape",
+        ),
+        Index("ix_model_logs_model_occurred", "model_name", "occurred_at"),
+    )
+
+    log_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    event_type: str = Field(max_length=20, index=True)
+    occurred_at: datetime = Field(
+        default_factory=utc_now,
+        sa_type=DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+    model_name: str = Field(max_length=255, index=True)
+    training_data_source: str | None = Field(default=None, max_length=50, index=True)
+    training_data_start_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )
+    training_data_end_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )
+    training_row_count: int | None = Field(default=None, ge=0)
+    model_size_bytes: int | None = Field(default=None, ge=0)
+    test_type: str | None = Field(default=None, max_length=100, index=True)
+    test_result: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(NULLABLE_JSON_DOCUMENT, nullable=True)
+    )
 
 
 class User(SQLModel, table=True):

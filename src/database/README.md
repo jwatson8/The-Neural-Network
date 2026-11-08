@@ -7,9 +7,11 @@ and Psycopg.
 
 ## Organization
 
-The database is organized by table and table-specific interactions. There are 8 tables:
+The database is organized by table and table-specific interactions. There are 10 tables:
 
-`stream_events`, `user_movie_history`, `recommendation_serves`, `users`, `llm_usage`, `movies`, `cold_start_jobs`, and `cold_start_profiles`.
+`stream_events`, `user_movie_history`, `recommendation_serves`, `users`,
+`llm_usage`, `movies`, `cold_start_jobs`, `cold_start_profiles`,
+`data_quality_logs`, and `model_logs`.
 
 Each table has a corresponding module under `src/database/interactions`. Public
 functions validate inputs through `schemas.py`, own their database transaction, and
@@ -66,8 +68,8 @@ function returns the number of newly inserted events.
 
 ## Search Functionality
 
-The append-only tables are `stream_events`, `recommendation_serves`, and
-`llm_usage`.
+The append-only tables are `stream_events`, `recommendation_serves`, `llm_usage`,
+`data_quality_logs`, and `model_logs`.
 
 Immutable interaction records can be searched in bounded pages. One intended use is
 a daily incremental job. In that case, use the stream event storage time so late
@@ -96,10 +98,15 @@ while True:
     cursor = page.next_cursor
 ```
 
-LLM usage and recommendation serves provide the same cursor pattern using their
-occurrence and serve timestamps. Search boundaries must include a timezone; the
-start is inclusive and the end is exclusive. Reuse the same window and filters when
-passing a cursor to the next search call.
+LLM usage, recommendation serves, data-quality logs, and model logs provide the
+same cursor pattern using their respective timestamps. Search boundaries must
+include a timezone; the start is inclusive and the end is exclusive. Reuse the
+same window and filters when passing a cursor to the next search call.
+
+Model training and test results are recorded independently from data-quality
+findings. Training logs identify the source table, storage-time window, row count,
+and optional artifact size. Test logs identify the test and store its named metrics
+as a JSON object.
 
 Updates raise a named error when the target does not exist. Validation and database
 constraint errors remain distinct so callers can choose whether to reject, retry,
