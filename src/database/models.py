@@ -233,9 +233,7 @@ class UserMovieHistory(SQLModel, table=True):
 class LicensingCost(SQLModel, table=True):
     __tablename__ = "licensing_costs"
     __table_args__ = (
-        UniqueConstraint(
-            "source_event_id", name="uq_licensing_costs_source_event"
-        ),
+        UniqueConstraint("source_event_id", name="uq_licensing_costs_source_event"),
         CheckConstraint(
             "license_cost IS NULL OR license_cost >= 0",
             name="ck_licensing_cost_non_negative",
@@ -254,9 +252,7 @@ class LicensingCost(SQLModel, table=True):
         sa_type=DateTime(timezone=True), nullable=False, index=True
     )
     user_id: str = Field(foreign_key="users.user_id", max_length=255, index=True)
-    movie_id: str = Field(
-        foreign_key="movies.movie_id", max_length=255, index=True
-    )
+    movie_id: str = Field(foreign_key="movies.movie_id", max_length=255, index=True)
     license_cost: Decimal | None = Field(
         default=None, max_digits=14, decimal_places=8, ge=0
     )
@@ -321,9 +317,7 @@ class LLMUsage(SQLModel, table=True):
 
 class MonitoringRun(SQLModel, table=True):
     __tablename__ = "monitoring_runs"
-    __table_args__ = (
-        Index("ix_monitoring_runs_window", "window_start", "window_end"),
-    )
+    __table_args__ = (Index("ix_monitoring_runs_window", "window_start", "window_end"),)
 
     run_id: UUID = Field(default_factory=uuid4, primary_key=True)
     generated_at: datetime = Field(
