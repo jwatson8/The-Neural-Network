@@ -13,6 +13,8 @@ git_cmd=(git -c "safe.directory=$PWD")
   echo 'Commit or resolve tracked VM changes before deployment'; exit 1;
 }
 [[ -f .env && -s artifacts/model.joblib ]] || { echo 'Missing VM .env or trained model'; exit 1; }
+exec 8>artifacts/.daily.lock
+flock -n 8 || { echo 'Daily model training or promotion is running; retry later'; exit 1; }
 "${git_cmd[@]}" fetch origin main
 [[ "$("${git_cmd[@]}" rev-parse origin/main)" == "$sha" ]] || {
   echo 'main has changed; rerun the workflow on latest main'; exit 1;
@@ -21,6 +23,8 @@ previous=$("${git_cmd[@]}" rev-parse HEAD)
 echo "Previous checkout: $previous; deploying: $sha"
 "${git_cmd[@]}" checkout --detach "$sha"
 export DEPLOY_TAG="$sha"
+export DAILY_MODEL_IMAGE="the-neural-network:$sha"
+export LOCAL_UID=$(id -u) LOCAL_GID=$(id -g)
 compose=(docker compose -p the-neural-network)
 if [[ "$live" == true ]]; then compose+=(--profile live); fi
 "${compose[@]}" config --quiet
