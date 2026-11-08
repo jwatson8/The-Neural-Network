@@ -7,11 +7,11 @@ and Psycopg.
 
 ## Organization
 
-The database is organized by table and table-specific interactions. There are 11 tables:
+The database is organized by table and table-specific interactions. There are 12 tables:
 
 `stream_events`, `user_movie_history`, `recommendation_serves`, `users`,
 `llm_usage`, `movies`, `cold_start_jobs`, `cold_start_profiles`,
-`data_quality_logs`, `model_logs`, and `licensing_costs`.
+`data_quality_logs`, `model_logs`, `licensing_costs`, and `monitoring_runs`.
 
 Each table has a corresponding module under `src/database/interactions`. Public
 functions validate inputs through `schemas.py`, own their database transaction, and
@@ -80,7 +80,8 @@ when their event time is at least 24 hours after the preceding accepted watch.
 ## Search Functionality
 
 The append-only tables are `stream_events`, `licensing_costs`,
-`recommendation_serves`, `llm_usage`, `data_quality_logs`, and `model_logs`.
+`recommendation_serves`, `llm_usage`, `data_quality_logs`, `model_logs`, and
+`monitoring_runs`.
 
 Immutable interaction records can be searched in bounded pages. One intended use is
 a daily incremental job. In that case, use the stream event storage time so late

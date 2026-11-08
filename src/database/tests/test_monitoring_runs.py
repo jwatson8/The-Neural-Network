@@ -1,0 +1,84 @@
+"""Tests for completed monitoring-run persistence."""
+
+import unittest
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
+from uuid import UUID
+
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel, create_engine
+
+from src.database.interactions import monitoring_runs
+from src.monitoring.schemas import MonitorResult
+
+
+class MonitoringRunTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(self.engine)
+        self.addCleanup(self.engine.dispose)
+        engine_patch = patch(
+            "src.database.database.get_engine", return_value=self.engine
+        )
+        engine_patch.start()
+        self.addCleanup(engine_patch.stop)
+        self.now = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def result(self, *, generated_at: datetime) -> MonitorResult:
+        return MonitorResult(
+            generated_at=generated_at,
+            window={
+                "start": generated_at - timedelta(hours=24),
+                "end": generated_at,
+            },
+            licensing={
+                "charge_count": 4,
+                "priced_charge_count": 3,
+                "total_license_cost": "1.25",
+            },
+            llm={
+                "request_count": 2,
+                "priced_request_count": 1,
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "estimated_cost_usd": "0.004",
+            },
+            quality={
+                "evaluated_rating_count": 40,
+                "attributed_rating_count": 20,
+                "positive_rating_count": 15,
+                "accuracy": 0.75,
+            },
+        )
+
+    def test_completed_runs_round_trip_and_search_newest_first(self):
+        first = monitoring_runs.create(
+            self.result(generated_at=self.now), run_id=UUID(int=1)
+        )
+        second = monitoring_runs.create(
+            self.result(generated_at=self.now + timedelta(hours=1)),
+            run_id=UUID(int=2),
+        )
+
+        stored = monitoring_runs.get(first.run_id)
+        page = monitoring_runs.search()
+
+        self.assertEqual(
+            stored.window_start.replace(tzinfo=UTC),
+            self.now - timedelta(hours=24),
+        )
+        self.assertEqual(stored.licensing_charge_count, 4)
+        self.assertEqual(stored.llm_input_tokens, 100)
+        self.assertEqual(stored.recommendation_accuracy, 0.75)
+        self.assertEqual(
+            [record.run_id for record in page.records],
+            [second.run_id, first.run_id],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

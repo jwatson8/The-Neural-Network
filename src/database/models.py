@@ -319,6 +319,32 @@ class LLMUsage(SQLModel, table=True):
     status: str = Field(max_length=50, index=True)
 
 
+class MonitoringRun(SQLModel, table=True):
+    __tablename__ = "monitoring_runs"
+    __table_args__ = (
+        Index("ix_monitoring_runs_window", "window_start", "window_end"),
+    )
+
+    run_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    generated_at: datetime = Field(
+        sa_type=DateTime(timezone=True), nullable=False, index=True
+    )
+    window_start: datetime = Field(sa_type=DateTime(timezone=True), nullable=False)
+    window_end: datetime = Field(sa_type=DateTime(timezone=True), nullable=False)
+    licensing_charge_count: int = Field(ge=0)
+    licensing_priced_charge_count: int = Field(ge=0)
+    total_license_cost: Decimal = Field(max_digits=14, decimal_places=8, ge=0)
+    llm_request_count: int = Field(ge=0)
+    llm_priced_request_count: int = Field(ge=0)
+    llm_input_tokens: int = Field(ge=0)
+    llm_output_tokens: int = Field(ge=0)
+    llm_estimated_cost_usd: Decimal = Field(max_digits=14, decimal_places=8, ge=0)
+    evaluated_rating_count: int = Field(ge=0)
+    attributed_rating_count: int = Field(ge=0)
+    positive_rating_count: int = Field(ge=0)
+    recommendation_accuracy: float | None = Field(default=None, ge=0, le=1)
+
+
 class ColdStartProfile(SQLModel, table=True):
     __tablename__ = "cold_start_profiles"
 
