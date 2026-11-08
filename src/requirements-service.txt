@@ -7,3 +7,4 @@ sqlmodel==0.0.48
 SQLAlchemy==2.1.6
 pydantic==2.14.2
 psycopg[binary]==3.2.12
+tzdata==2026.6

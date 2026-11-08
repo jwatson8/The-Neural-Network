@@ -54,6 +54,7 @@ jobs:
       PROFILE_VOLUME_NAME: ci-profiles
       POSTGRES_PASSWORD: ci-only-not-a-production-secret
       BIND_ADDRESS: 127.0.0.1
+      DAILY_MODEL_UPDATES_ENABLED: 'false'
     steps:
       - uses: actions/checkout@v4
       - run: docker compose --profile live config --quiet
@@ -64,6 +65,22 @@ jobs:
       - run: docker compose up -d --wait --wait-timeout 120
       - run: docker compose exec -T api python deployment/smoke_test.py
       - run: curl --fail --max-time 0.6 http://127.0.0.1:8082/recommend/1
+      - name: Daily job uses isolated PostgreSQL and retains model without fresh data
+        run: |
+          before=$(sha256sum artifacts/model.joblib)
+          docker compose run --rm --no-deps --user "$(id -u):$(id -g)" daily-model-updater python -m src.model_updates.daily
+          test "$before" = "$(sha256sum artifacts/model.joblib)"
+          python -c 'import glob,json; r=json.load(open(glob.glob("artifacts/daily/*/report.json")[0])); assert r["status"] == "insufficient_data"; assert not r["eligible_for_manual_promotion"]'
+          mkdir -p reports
+          cp artifacts/daily/*/report.json reports/daily-report.json
+      - name: Verify actual model swap and rollback in isolated containers
+        run: |
+          before=$(sha256sum artifacts/model.joblib)
+          docker compose run --rm --no-deps --user "$(id -u):$(id -g)" -e CI_DAILY_SMOKE=1 daily-model-updater python -m src.tests.ci_model_swap
+          bash deployment/daily_model.sh promote 2000-01-01
+          bash deployment/daily_model.sh rollback 2000-01-01
+          test "$before" = "$(sha256sum artifacts/model.joblib)"
+          cp artifacts/daily/2000-01-01/promotion.json reports/ci-promotion.json
       - name: Collect container evidence
         if: always()
         run: |

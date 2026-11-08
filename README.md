@@ -51,3 +51,6 @@ key work; verify those on the VM before claiming full M1 deployment.
 ## Continuous integration and deployment
 
 See [the CI/CD guide](deployment/CI_CD.md) for automatic tests, coverage reports, and manually triggered deployment to the CMU VM.
+## Daily model candidates
+
+See [daily model updates](deployment/DAILY_MODELS.md) for the 02:00 Eastern schedule, data prerequisites, comparison metrics, reports, manual promotion and rollback.
