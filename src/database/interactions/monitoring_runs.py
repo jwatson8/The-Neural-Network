@@ -1,10 +1,10 @@
-"""Append-only persistence for completed monitoring runs."""
+"""Idempotent persistence for completed monitoring buckets."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from src.database.interactions._pagination import (
     SearchCursor,
@@ -13,6 +13,7 @@ from src.database.interactions._pagination import (
 )
 from src.database.interactions._shared import (
     create_record,
+    dialect_insert,
     run,
 )
 from src.database.interactions._shared import (
@@ -21,15 +22,19 @@ from src.database.interactions._shared import (
 from src.database.models import MonitoringRun
 from src.monitoring.schemas import MonitorResult
 
-__all__ = ["create", "get", "list_records", "search"]
+__all__ = [
+    "create",
+    "get",
+    "list_records",
+    "list_windows",
+    "search",
+    "upsert_many",
+]
 
 
-def _create(
-    session: Session,
-    result: MonitorResult,
-    run_id: UUID | None,
-) -> MonitoringRun:
-    values: dict[str, Any] = {
+def _result_values(result: MonitorResult, run_id: UUID) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
         "generated_at": result.generated_at,
         "window_start": result.window.start,
         "window_end": result.window.end,
@@ -46,8 +51,21 @@ def _create(
         "positive_rating_count": result.quality.positive_rating_count,
         "recommendation_accuracy": result.quality.accuracy,
     }
-    if run_id is not None:
-        values["run_id"] = run_id
+
+
+def _bucket_run_id(result: MonitorResult) -> UUID:
+    identity = (
+        f"monitoring:{result.window.start.isoformat()}:{result.window.end.isoformat()}"
+    )
+    return uuid5(NAMESPACE_URL, identity)
+
+
+def _create(
+    session: Session,
+    result: MonitorResult,
+    run_id: UUID | None,
+) -> MonitoringRun:
+    values = _result_values(result, run_id or _bucket_run_id(result))
     return create_record(session, MonitoringRun, values)
 
 
@@ -64,6 +82,62 @@ def create(
 def get(run_id: UUID) -> MonitoringRun | None:
     """Return the monitoring run identified by its UUID, or ``None``."""
     return run(lambda session: session.get(MonitoringRun, run_id))
+
+
+def _upsert_many(
+    session: Session,
+    results: list[MonitorResult],
+) -> list[MonitoringRun]:
+    if not results:
+        return []
+    values = [_result_values(result, _bucket_run_id(result)) for result in results]
+    statement = dialect_insert(session, MonitoringRun).values(values)
+    update_fields = tuple(key for key in values[0] if key != "run_id")
+    statement = statement.on_conflict_do_update(
+        index_elements=["run_id"],
+        set_={field: getattr(statement.excluded, field) for field in update_fields},
+    )
+    session.execute(statement)
+    session.flush()
+    run_ids = [value["run_id"] for value in values]
+    return list(
+        session.exec(
+            select(MonitoringRun)
+            .where(MonitoringRun.run_id.in_(run_ids))
+            .order_by(MonitoringRun.window_start)
+        ).all()
+    )
+
+
+def upsert_many(
+    results: list[MonitorResult | dict[str, Any]],
+) -> list[MonitoringRun]:
+    """Atomically insert or replace deterministic monitoring buckets."""
+    validated = [MonitorResult.model_validate(result) for result in results]
+    return run(lambda session: _upsert_many(session, validated))
+
+
+def list_windows(*, start: datetime, end: datetime) -> set[tuple[datetime, datetime]]:
+    """Return stored windows fully contained in a bounded time range."""
+
+    def utc(value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    def operation(session: Session):
+        rows = session.exec(
+            select(MonitoringRun.window_start, MonitoringRun.window_end).where(
+                MonitoringRun.window_start >= start,
+                MonitoringRun.window_end <= end,
+            )
+        ).all()
+        return {
+            (utc(window_start), utc(window_end))
+            for window_start, window_end in rows
+        }
+
+    return run(operation)
 
 
 def list_records(*, offset: int = 0, limit: int = 100) -> list[MonitoringRun]:

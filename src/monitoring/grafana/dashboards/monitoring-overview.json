@@ -24,11 +24,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT generated_at AS time, total_license_cost::double precision AS \"License cost\" FROM monitoring_runs WHERE $__timeFilter(generated_at) ORDER BY generated_at",
+          "rawSql": "WITH buckets AS (SELECT window_end AS time, total_license_cost::double precision AS value FROM monitoring_runs WHERE window_end >= CAST($__timeFrom() AS timestamptz) - INTERVAL '24 hours' AND window_end <= CAST($__timeTo() AS timestamptz) AND window_end = window_start + INTERVAL '5 minutes'), series AS (SELECT time, value, SUM(value) OVER (ORDER BY time RANGE BETWEEN INTERVAL '23 hours 55 minutes' PRECEDING AND CURRENT ROW) AS rolling FROM buckets) SELECT time, value AS \"5-minute license cost\", rolling AS \"Rolling 24-hour license cost\" FROM series WHERE time >= CAST($__timeFrom() AS timestamptz) ORDER BY time",
           "refId": "A"
         }
       ],
-      "title": "License Cost per Evaluation Window",
+      "title": "License Cost: 5-Minute and Rolling 24-Hour",
       "type": "timeseries"
     },
     {
@@ -49,11 +49,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT generated_at AS time, llm_estimated_cost_usd::double precision AS \"Estimated LLM cost\" FROM monitoring_runs WHERE $__timeFilter(generated_at) ORDER BY generated_at",
+          "rawSql": "WITH buckets AS (SELECT window_end AS time, llm_estimated_cost_usd::double precision AS value FROM monitoring_runs WHERE window_end >= CAST($__timeFrom() AS timestamptz) - INTERVAL '24 hours' AND window_end <= CAST($__timeTo() AS timestamptz) AND window_end = window_start + INTERVAL '5 minutes'), series AS (SELECT time, value, SUM(value) OVER (ORDER BY time RANGE BETWEEN INTERVAL '23 hours 55 minutes' PRECEDING AND CURRENT ROW) AS rolling FROM buckets) SELECT time, value AS \"5-minute estimated LLM cost\", rolling AS \"Rolling 24-hour estimated LLM cost\" FROM series WHERE time >= CAST($__timeFrom() AS timestamptz) ORDER BY time",
           "refId": "A"
         }
       ],
-      "title": "Estimated LLM Cost per Evaluation Window",
+      "title": "Estimated LLM Cost: 5-Minute and Rolling 24-Hour",
       "type": "timeseries"
     },
     {
@@ -74,11 +74,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT generated_at AS time, llm_input_tokens::double precision AS \"Input tokens\", llm_output_tokens::double precision AS \"Output tokens\" FROM monitoring_runs WHERE $__timeFilter(generated_at) ORDER BY generated_at",
+          "rawSql": "WITH buckets AS (SELECT window_end AS time, llm_input_tokens::double precision AS input_tokens, llm_output_tokens::double precision AS output_tokens FROM monitoring_runs WHERE window_end >= CAST($__timeFrom() AS timestamptz) - INTERVAL '24 hours' AND window_end <= CAST($__timeTo() AS timestamptz) AND window_end = window_start + INTERVAL '5 minutes'), series AS (SELECT time, input_tokens, output_tokens, SUM(input_tokens) OVER (ORDER BY time RANGE BETWEEN INTERVAL '23 hours 55 minutes' PRECEDING AND CURRENT ROW) AS rolling_input, SUM(output_tokens) OVER (ORDER BY time RANGE BETWEEN INTERVAL '23 hours 55 minutes' PRECEDING AND CURRENT ROW) AS rolling_output FROM buckets) SELECT time, input_tokens AS \"5-minute input tokens\", output_tokens AS \"5-minute output tokens\", rolling_input AS \"Rolling 24-hour input tokens\", rolling_output AS \"Rolling 24-hour output tokens\" FROM series WHERE time >= CAST($__timeFrom() AS timestamptz) ORDER BY time",
           "refId": "A"
         }
       ],
-      "title": "LLM Tokens per Evaluation Window",
+      "title": "LLM Tokens: 5-Minute and Rolling 24-Hour",
       "type": "timeseries"
     },
     {
@@ -99,11 +99,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT generated_at AS time, recommendation_accuracy::double precision AS \"Accuracy\" FROM monitoring_runs WHERE $__timeFilter(generated_at) ORDER BY generated_at",
+          "rawSql": "WITH buckets AS (SELECT window_end AS time, attributed_rating_count::double precision AS attributed, positive_rating_count::double precision AS positive, recommendation_accuracy::double precision AS bucket_accuracy FROM monitoring_runs WHERE window_end >= CAST($__timeFrom() AS timestamptz) - INTERVAL '24 hours' AND window_end <= CAST($__timeTo() AS timestamptz) AND window_end = window_start + INTERVAL '5 minutes'), series AS (SELECT time, bucket_accuracy, SUM(attributed) OVER window_24h AS rolling_attributed, SUM(positive) OVER window_24h AS rolling_positive FROM buckets WINDOW window_24h AS (ORDER BY time RANGE BETWEEN INTERVAL '23 hours 55 minutes' PRECEDING AND CURRENT ROW)) SELECT time, bucket_accuracy AS \"5-minute accuracy\", CASE WHEN rolling_attributed = 0 THEN NULL ELSE rolling_positive / rolling_attributed END AS \"Rolling 24-hour accuracy\" FROM series WHERE time >= CAST($__timeFrom() AS timestamptz) ORDER BY time",
           "refId": "A"
         }
       ],
-      "title": "Recommendation Accuracy",
+      "title": "Recommendation Accuracy: 5-Minute and Rolling 24-Hour",
       "type": "timeseries"
     },
     {
@@ -124,11 +124,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT generated_at AS time, CASE WHEN evaluated_rating_count = 0 THEN NULL ELSE attributed_rating_count::double precision / evaluated_rating_count END AS \"Attribution coverage\" FROM monitoring_runs WHERE $__timeFilter(generated_at) ORDER BY generated_at",
+          "rawSql": "WITH buckets AS (SELECT window_end AS time, evaluated_rating_count::double precision AS evaluated, attributed_rating_count::double precision AS attributed FROM monitoring_runs WHERE window_end >= CAST($__timeFrom() AS timestamptz) - INTERVAL '24 hours' AND window_end <= CAST($__timeTo() AS timestamptz) AND window_end = window_start + INTERVAL '5 minutes'), series AS (SELECT time, evaluated, attributed, SUM(evaluated) OVER window_24h AS rolling_evaluated, SUM(attributed) OVER window_24h AS rolling_attributed FROM buckets WINDOW window_24h AS (ORDER BY time RANGE BETWEEN INTERVAL '23 hours 55 minutes' PRECEDING AND CURRENT ROW)) SELECT time, CASE WHEN evaluated = 0 THEN NULL ELSE attributed / evaluated END AS \"5-minute attribution coverage\", CASE WHEN rolling_evaluated = 0 THEN NULL ELSE rolling_attributed / rolling_evaluated END AS \"Rolling 24-hour attribution coverage\" FROM series WHERE time >= CAST($__timeFrom() AS timestamptz) ORDER BY time",
           "refId": "A"
         }
       ],
-      "title": "Rating Attribution Coverage",
+      "title": "Rating Attribution Coverage: 5-Minute and Rolling 24-Hour",
       "type": "timeseries"
     },
     {
@@ -141,8 +141,8 @@
             "mode": "absolute",
             "steps": [
               {"color": "green", "value": null},
-              {"color": "yellow", "value": 120},
-              {"color": "red", "value": 300}
+              {"color": "yellow", "value": 420},
+              {"color": "red", "value": 600}
             ]
           },
           "unit": "s"
@@ -191,7 +191,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(occurred_at, '1m'), COUNT(*)::double precision AS \"Failures\" FROM data_quality_logs WHERE $__timeFilter(occurred_at) AND source = 'monitoring' AND issue_type = 'monitoring_run_failure' GROUP BY 1 ORDER BY 1",
+          "rawSql": "SELECT $__timeGroupAlias(occurred_at, '5m'), COUNT(*)::double precision AS \"Failures\" FROM data_quality_logs WHERE $__timeFilter(occurred_at) AND source = 'monitoring' AND issue_type = 'monitoring_run_failure' GROUP BY 1 ORDER BY 1",
           "refId": "A"
         }
       ],
@@ -208,6 +208,6 @@
   "timezone": "browser",
   "title": "Monitoring Overview",
   "uid": "monitoring-overview",
-  "version": 1,
+  "version": 3,
   "weekStart": ""
 }

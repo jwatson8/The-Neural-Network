@@ -48,6 +48,15 @@ class GrafanaProvisioningTests(unittest.TestCase):
         self.assertEqual(len(dashboard["panels"]), 7)
         self.assertIn("Successful Run Freshness", panel_titles)
         self.assertIn("Monitoring Failures", panel_titles)
+        queries = " ".join(
+            target["rawSql"]
+            for panel in dashboard["panels"]
+            for target in panel["targets"]
+        )
+        self.assertIn("INTERVAL '5 minutes'", queries)
+        self.assertIn("Rolling 24-hour accuracy", queries)
+        self.assertNotIn("$__timeFrom() - INTERVAL", queries)
+        self.assertIn("CAST($__timeFrom() AS timestamptz)", queries)
 
         datasource = (
             GRAFANA_ROOT / "provisioning" / "datasources" / "monitoring.yaml"

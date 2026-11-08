@@ -79,6 +79,26 @@ class MonitoringRunTests(unittest.TestCase):
             [second.run_id, first.run_id],
         )
 
+    def test_bucket_upserts_are_idempotent_and_refresh_values(self):
+        result = self.result(generated_at=self.now)
+        result.window.start = self.now - timedelta(minutes=5)
+        result.window.end = self.now
+
+        first = monitoring_runs.upsert_many([result])[0]
+        result.generated_at = self.now + timedelta(minutes=5)
+        result.licensing.total_license_cost = 2
+        second = monitoring_runs.upsert_many([result])[0]
+
+        self.assertEqual(first.run_id, second.run_id)
+        self.assertEqual(len(monitoring_runs.list_records()), 1)
+        self.assertEqual(second.total_license_cost, 2)
+        self.assertEqual(
+            monitoring_runs.list_windows(
+                start=self.now - timedelta(hours=1), end=self.now
+            ),
+            {(self.now - timedelta(minutes=5), self.now)},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

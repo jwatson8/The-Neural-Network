@@ -12,20 +12,21 @@ def _normalize_utc(value: datetime, field_name: str) -> datetime:
 
 
 class MonitoringConfig(BaseModel):
-    """
-    Establishes operating setting for the monitoring script.
-    """
+    """Operating settings for bounded monitoring bucket reconciliation."""
 
-    interval_seconds: int = Field(default=60, gt=0)
-    window_hours: int = Field(default=24, gt=0)
+    bucket_minutes: int = Field(default=5, gt=0, le=60)
+    reconciliation_hours: int = Field(default=1, gt=0)
+    backfill_hours: int = Field(default=24, gt=0)
     attribution_hours: int = Field(default=24, gt=0)
     positive_rating_threshold: int = Field(default=6, ge=1, le=10)
     page_size: int = Field(default=1000, ge=1, le=1000)
 
     @model_validator(mode="after")
-    def check_window_coverage(self):
-        if self.interval_seconds > self.window_hours * 3600:
-            raise ValueError("interval_seconds must not exceed the evaluation window")
+    def check_bucket_coverage(self):
+        if 60 % self.bucket_minutes:
+            raise ValueError("bucket_minutes must divide evenly into one hour")
+        if self.reconciliation_hours > self.backfill_hours:
+            raise ValueError("reconciliation_hours must not exceed backfill_hours")
         return self
 
 

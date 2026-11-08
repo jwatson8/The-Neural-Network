@@ -9,6 +9,7 @@ from src.monitoring.schemas import (
     EvaluationWindow,
     LicensingSummary,
     LLMSummary,
+    MonitoringConfig,
     MonitorResult,
     QualitySummary,
 )
@@ -50,6 +51,17 @@ class MonitoringSchemaTests(unittest.TestCase):
                 output_tokens=0,
                 estimated_cost_usd="0",
             )
+
+    def test_monitoring_config_uses_bounded_five_minute_defaults(self):
+        config = MonitoringConfig()
+
+        self.assertEqual(config.bucket_minutes, 5)
+        self.assertEqual(config.reconciliation_hours, 1)
+        self.assertEqual(config.backfill_hours, 24)
+        with self.assertRaises(ValidationError):
+            MonitoringConfig(bucket_minutes=7)
+        with self.assertRaises(ValidationError):
+            MonitoringConfig(reconciliation_hours=2, backfill_hours=1)
 
     def test_quality_summary_enforces_count_and_accuracy_contract(self):
         summary = QualitySummary(

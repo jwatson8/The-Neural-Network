@@ -1,7 +1,7 @@
-"""Tests for the scheduled monitoring worker."""
+"""Tests for the UTC-aligned monitoring worker."""
 
 import unittest
-from types import SimpleNamespace
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from src.monitoring import monitoring_worker
@@ -28,46 +28,45 @@ class StopEvent:
 
 
 class MonitoringWorkerTests(unittest.TestCase):
-    def test_runs_immediately_and_maintains_start_to_start_cadence(self):
-        config = MonitoringConfig(interval_seconds=60)
+    def test_runs_immediately_and_waits_for_the_next_utc_boundary(self):
+        config = MonitoringConfig()
         stop_event = StopEvent()
-        saved_run = SimpleNamespace(run_id="run-1")
-
         with patch.object(
             monitoring_worker.time, "monotonic", side_effect=(100, 103)
         ), patch.object(
-            monitoring_worker, "run_monitoring_workload", return_value=saved_run
-        ) as run_workload:
+            monitoring_worker, "run_monitoring_workload", return_value=[object()]
+        ) as run_workload, patch.object(monitoring_worker, "datetime") as clock:
+            clock.now.return_value = datetime(2026, 1, 1, 2, 3, 20, tzinfo=UTC)
             monitoring_worker.run_monitoring_worker(config, stop_event)
 
         run_workload.assert_called_once_with(config)
-        self.assertEqual(stop_event.waits, [57])
+        self.assertEqual(stop_event.waits, [100])
 
     def test_failure_is_logged_and_next_run_still_executes(self):
-        config = MonitoringConfig(interval_seconds=60)
+        config = MonitoringConfig()
         stop_event = StopEvent(stop_after_waits=2)
-        outcomes = (
-            RuntimeError("database unavailable"),
-            SimpleNamespace(run_id="run-2"),
-        )
-
+        outcomes = (RuntimeError("database unavailable"), [object()])
         with patch.object(
             monitoring_worker.time,
             "monotonic",
             side_effect=(100, 101, 160, 162),
         ), patch.object(
-            monitoring_worker,
-            "run_monitoring_workload",
-            side_effect=outcomes,
+            monitoring_worker, "run_monitoring_workload", side_effect=outcomes
         ) as run_workload, patch.object(
             monitoring_worker.data_quality_logs, "create"
-        ) as persist_failure, self.assertLogs(
+        ) as persist_failure, patch.object(
+            monitoring_worker, "datetime"
+        ) as clock, self.assertLogs(
             monitoring_worker.LOGGER, level="ERROR"
         ):
+            clock.now.side_effect = (
+                datetime(2026, 1, 1, 2, 4, tzinfo=UTC),
+                datetime(2026, 1, 1, 2, 5, 30, tzinfo=UTC),
+            )
             monitoring_worker.run_monitoring_worker(config, stop_event)
 
         self.assertEqual(run_workload.call_count, 2)
-        self.assertEqual(stop_event.waits, [59, 58])
+        self.assertEqual(stop_event.waits, [60, 270])
         failure = persist_failure.call_args.kwargs
         self.assertEqual(failure["source"], "monitoring")
         self.assertEqual(failure["issue_type"], "monitoring_run_failure")
@@ -88,7 +87,6 @@ class MonitoringWorkerTests(unittest.TestCase):
 
     def test_stopped_worker_does_not_start_workload(self):
         stop_event = StopEvent(stopped=True)
-
         with patch.object(
             monitoring_worker, "run_monitoring_workload"
         ) as run_workload:
@@ -99,7 +97,6 @@ class MonitoringWorkerTests(unittest.TestCase):
 
     def test_main_uses_default_config_and_registers_shutdown_signals(self):
         stop_event = StopEvent(stopped=True)
-
         with patch.object(
             monitoring_worker, "Event", return_value=stop_event
         ), patch.object(
@@ -109,8 +106,7 @@ class MonitoringWorkerTests(unittest.TestCase):
         ) as run_worker:
             monitoring_worker.main()
 
-        config = run_worker.call_args.args[0]
-        self.assertEqual(config, MonitoringConfig())
+        self.assertEqual(run_worker.call_args.args[0], MonitoringConfig())
         self.assertIs(run_worker.call_args.args[1], stop_event)
         self.assertEqual(
             [registered.args[0] for registered in register_signal.call_args_list],

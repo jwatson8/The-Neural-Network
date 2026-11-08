@@ -3,6 +3,7 @@
 import logging
 import signal
 import time
+from datetime import UTC, datetime
 from threading import Event
 
 from src.database.interactions import data_quality_logs
@@ -29,18 +30,18 @@ def _persist_monitoring_failure(error: Exception, duration: float) -> None:
 
 
 def run_monitoring_worker(config: MonitoringConfig, stop_event: Event) -> None:
-    """Run monitoring workloads at a fixed start-to-start interval."""
+    """Run immediately, then reconcile on UTC bucket boundaries."""
     LOGGER.info(
-        "monitoring_worker_started interval_seconds=%d", config.interval_seconds
+        "monitoring_worker_started bucket_minutes=%d", config.bucket_minutes
     )
     while not stop_event.is_set():
         started_at = time.monotonic()
         try:
-            saved_run = run_monitoring_workload(config)
+            saved_runs = run_monitoring_workload(config)
             duration = time.monotonic() - started_at
             LOGGER.info(
-                "monitoring_run_completed run_id=%s duration_seconds=%.3f",
-                saved_run.run_id,
+                "monitoring_run_completed bucket_count=%d duration_seconds=%.3f",
+                len(saved_runs),
                 duration,
             )
         except Exception as error:
@@ -51,12 +52,10 @@ def run_monitoring_worker(config: MonitoringConfig, stop_event: Event) -> None:
             )
             _persist_monitoring_failure(error, duration)
 
-        delay = max(0, config.interval_seconds - duration)
-        if delay == 0 and duration >= config.interval_seconds:
-            LOGGER.warning(
-                "monitoring_run_exceeded_interval duration_seconds=%.3f",
-                duration,
-            )
+        now = datetime.now(UTC)
+        bucket_seconds = config.bucket_minutes * 60
+        elapsed_seconds = now.minute * 60 + now.second + now.microsecond / 1_000_000
+        delay = bucket_seconds - elapsed_seconds % bucket_seconds
         stop_event.wait(delay)
     LOGGER.info("monitoring_worker_stopped")
 
