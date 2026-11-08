@@ -81,6 +81,18 @@ class DataQualityPersistenceTests(unittest.TestCase):
         self.assertIsNone(row.user_id)
         self.assertIsNone(row.event_id)
 
+    def test_monitoring_failures_are_supported(self) -> None:
+        row = data_quality_logs.create(
+            source="monitoring",
+            severity="ERROR",
+            issue_type="monitoring_run_failure",
+            error_details=[{"error_type": "RuntimeError"}],
+            log_metadata={"operation": "monitoring_workload"},
+        )
+
+        self.assertEqual(row.source, "monitoring")
+        self.assertEqual(row.issue_type, "monitoring_run_failure")
+
     def test_drift_results_are_persisted_for_all_statuses(self) -> None:
         for old, new in (([1], [10]), ([1], [1]), ([], []), ([None], [1])):
             result = detect_rating_drift([{"rating": x} for x in old], [{"rating": x} for x in new], min_samples=1)

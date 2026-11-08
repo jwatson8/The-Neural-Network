@@ -7,10 +7,11 @@ and Psycopg.
 
 ## Organization
 
-The database is organized by table and table-specific interactions. There are 9 tables:
+The database is organized by table and table-specific interactions. There are 13 tables:
 
 `stream_events`, `course_requests`, `user_movie_history`, `recommendation_serves`,
-`users`, `llm_usage`, `movies`, `cold_start_jobs`, and `cold_start_profiles`.
+`users`, `llm_usage`, `movies`, `cold_start_jobs`, `cold_start_profiles`,
+`data_quality_logs`, `model_logs`, `licensing_costs`, and `monitoring_runs`.
 
 Each table has a corresponding module under `src/database/interactions`. Public
 functions validate inputs through `schemas.py`, own their database transaction, and
@@ -63,12 +64,24 @@ inserted_count = stream_events.create_many(normalized_events)
 ```
 
 The batch is written in one transaction. Duplicate event UUIDs are skipped, and the
-function returns the number of newly inserted events.
+function returns the number of newly inserted events. Newly inserted watch and
+rating events update `user_movie_history` in the same transaction. Application
+callers write through `stream_events`; `user_movie_history` exposes read operations.
+
+Each history row records `last_recorded_watch_at`, `last_recorded_rating_at`, the
+latest rating, and whether the most recent accepted rating changed its predecessor.
+Older and equal-time events remain in `stream_events` but do not regress the
+materialized history row.
+
+New watch events also derive immutable licensing charges in the same transaction.
+The first watch for a user/movie pair is charged. Later watches are charged only
+when their event time is at least 24 hours after the preceding accepted watch.
 
 ## Search Functionality
 
-The append-only tables are `stream_events`, `course_requests`,
-`recommendation_serves`, and `llm_usage`.
+The append-only tables are `stream_events`, `course_requests`, `licensing_costs`,
+`recommendation_serves`, `llm_usage`, `data_quality_logs`, `model_logs`, and
+`monitoring_runs`.
 
 Immutable interaction records can be searched in bounded pages. One intended use is
 a daily incremental job. In that case, use the stream event storage time so late
@@ -97,10 +110,15 @@ while True:
     cursor = page.next_cursor
 ```
 
-LLM usage and recommendation serves provide the same cursor pattern using their
-occurrence and serve timestamps. Search boundaries must include a timezone; the
-start is inclusive and the end is exclusive. Reuse the same window and filters when
-passing a cursor to the next search call.
+LLM usage, recommendation serves, data-quality logs, and model logs provide the
+same cursor pattern using their respective timestamps. Search boundaries must
+include a timezone; the start is inclusive and the end is exclusive. Reuse the
+same window and filters when passing a cursor to the next search call.
+
+Model training and test results are recorded independently from data-quality
+findings. Training logs identify the source table, storage-time window, row count,
+and optional artifact size. Test logs identify the test and store its named metrics
+as a JSON object.
 
 Updates raise a named error when the target does not exist. Validation and database
 constraint errors remain distinct so callers can choose whether to reject, retry,
@@ -126,9 +144,9 @@ The system requires initial data, which is provided by the existing CSV snapshot
 
 `roll_up.py` is exclusively for the initial users, movies, and events snapshot. It
 inserts missing users and movies without replacing existing source data, derives
-`user_movie_history`, uses deterministic event IDs, and is safe to rerun. Its JSON
-report includes created counts and skipped IDs. Live services and Kafka consumers
-must use the interaction API instead.
+`user_movie_history` and `licensing_costs`, uses deterministic event IDs, and is
+safe to rerun. Its JSON report includes created counts and skipped IDs. Live
+services and Kafka consumers must use the interaction API instead.
 
 ```sh
 docker compose run --rm database-roll-up

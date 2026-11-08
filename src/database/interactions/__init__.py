@@ -13,13 +13,16 @@ EX:
     )
 
 Use ``create_many`` for immutable event batches and ``create_missing_many`` when
-loading users or movies without replacing records already present. Derived current
-state, such as user/movie history, exposes explicit upsert operations. Append-only
+loading users or movies without replacing records already present. User/movie
+history is derived atomically from immutable watch and rating events. Append-only
 modules expose no update operation and provide cursor-based ``search`` functions
 for bounded offline reads. Functions prefixed with an underscore are private
 transaction implementations and must not be imported by application code. Validation
 errors describe bad inputs, database integrity errors describe constraint violations,
 and ``RecordNotFoundError`` identifies updates of missing records.
+
+Watch events also derive immutable licensing charges in the same transaction. Read
+those snapshots through ``licensing_costs``; callers do not create them directly.
 """
 
 from src.database.interactions import (
@@ -28,8 +31,12 @@ from src.database.interactions import (
     cold_start_profiles,
     database_summary,
     data_quality_logs,
+    licensing_costs,
     llm_usage,
+    model_logs,
+    monitoring_runs,
     movies,
+    rating_attributions,
     recommendation_serves,
     stream_events,
     user_movie_history,
@@ -47,8 +54,12 @@ __all__ = [
     "cold_start_profiles",
     "database_summary",
     "data_quality_logs",
+    "licensing_costs",
     "llm_usage",
+    "model_logs",
+    "monitoring_runs",
     "movies",
+    "rating_attributions",
     "recommendation_serves",
     "stream_events",
     "user_movie_history",

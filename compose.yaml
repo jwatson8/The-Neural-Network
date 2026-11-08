@@ -71,6 +71,49 @@ services:
     depends_on:
       database-init: {condition: service_completed_successfully}
 
+  monitoring-worker:
+    <<: *service
+    profiles: [monitoring]
+    command: [python, -m, src.monitoring.monitoring_worker]
+    environment: *database-connection
+    depends_on:
+      database-init: {condition: service_completed_successfully}
+
+  grafana-database-init:
+    <<: *service
+    profiles: [monitoring]
+    restart: "no"
+    command: [python, -m, src.monitoring.grafana.provision_reader]
+    environment:
+      <<: *database-connection
+      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-}
+    depends_on:
+      database-init: {condition: service_completed_successfully}
+
+  grafana:
+    image: grafana/grafana:13.3.0
+    profiles: [monitoring]
+    restart: unless-stopped
+    init: true
+    ports: ["127.0.0.1:${GRAFANA_PORT:-3000}:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GRAFANA_DB_NAME: ${POSTGRES_DB:-recommender}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./src/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./src/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      grafana-database-init: {condition: service_completed_successfully}
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
   train:
     <<: *service
     profiles: [tools]
@@ -148,3 +191,7 @@ services:
 
 volumes:
   postgres-data:
+  grafana-data:
+  profiles:
+    # Reuse the original VM smoke deployment's persistent profiles by default.
+    name: ${PROFILE_VOLUME_NAME:-neural-network-smoke_smoke-profiles}
