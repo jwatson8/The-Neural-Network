@@ -1,0 +1,22 @@
+apiVersion: 1
+prune: true
+
+datasources:
+  - name: Monitoring PostgreSQL
+    uid: monitoring-postgres
+    type: postgres
+    access: proxy
+    url: database:5432
+    user: grafana_reader
+    isDefault: true
+    editable: false
+    secureJsonData:
+      password: $__env{GRAFANA_DB_PASSWORD}
+    jsonData:
+      database: $__env{GRAFANA_DB_NAME}
+      sslmode: disable
+      postgresVersion: 1700
+      timescaledb: false
+      maxOpenConns: 5
+      maxIdleConns: 2
+      connMaxLifetime: 14400
