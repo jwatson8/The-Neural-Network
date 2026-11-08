@@ -20,12 +20,16 @@ for bounded offline reads. Functions prefixed with an underscore are private
 transaction implementations and must not be imported by application code. Validation
 errors describe bad inputs, database integrity errors describe constraint violations,
 and ``RecordNotFoundError`` identifies updates of missing records.
+
+Watch events also derive immutable licensing charges in the same transaction. Read
+those snapshots through ``licensing_costs``; callers do not create them directly.
 """
 
 from src.database.interactions import (
     cold_start_jobs,
     cold_start_profiles,
     data_quality_logs,
+    licensing_costs,
     llm_usage,
     model_logs,
     movies,
@@ -44,6 +48,7 @@ __all__ = [
     "cold_start_jobs",
     "cold_start_profiles",
     "data_quality_logs",
+    "licensing_costs",
     "llm_usage",
     "model_logs",
     "movies",

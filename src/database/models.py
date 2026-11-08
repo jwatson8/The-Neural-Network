@@ -5,7 +5,15 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Index, Text
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Index,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -220,6 +228,38 @@ class UserMovieHistory(SQLModel, table=True):
         default=None, sa_type=DateTime(timezone=True)
     )
     rating_changed: bool = Field(default=False, nullable=False)
+
+
+class LicensingCost(SQLModel, table=True):
+    __tablename__ = "licensing_costs"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_event_id", name="uq_licensing_costs_source_event"
+        ),
+        CheckConstraint(
+            "license_cost IS NULL OR license_cost >= 0",
+            name="ck_licensing_cost_non_negative",
+        ),
+        Index(
+            "ix_licensing_costs_user_movie_charged",
+            "user_id",
+            "movie_id",
+            "charged_at",
+        ),
+    )
+
+    licensing_cost_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    source_event_id: UUID = Field(foreign_key="stream_events.event_id", index=True)
+    charged_at: datetime = Field(
+        sa_type=DateTime(timezone=True), nullable=False, index=True
+    )
+    user_id: str = Field(foreign_key="users.user_id", max_length=255, index=True)
+    movie_id: str = Field(
+        foreign_key="movies.movie_id", max_length=255, index=True
+    )
+    license_cost: Decimal | None = Field(
+        default=None, max_digits=14, decimal_places=8, ge=0
+    )
 
 
 class RecommendationServe(SQLModel, table=True):

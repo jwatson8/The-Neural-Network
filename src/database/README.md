@@ -7,11 +7,11 @@ and Psycopg.
 
 ## Organization
 
-The database is organized by table and table-specific interactions. There are 10 tables:
+The database is organized by table and table-specific interactions. There are 11 tables:
 
 `stream_events`, `user_movie_history`, `recommendation_serves`, `users`,
 `llm_usage`, `movies`, `cold_start_jobs`, `cold_start_profiles`,
-`data_quality_logs`, and `model_logs`.
+`data_quality_logs`, `model_logs`, and `licensing_costs`.
 
 Each table has a corresponding module under `src/database/interactions`. Public
 functions validate inputs through `schemas.py`, own their database transaction, and
@@ -73,10 +73,14 @@ latest rating, and whether the most recent accepted rating changed its predecess
 Older and equal-time events remain in `stream_events` but do not regress the
 materialized history row.
 
+New watch events also derive immutable licensing charges in the same transaction.
+The first watch for a user/movie pair is charged. Later watches are charged only
+when their event time is at least 24 hours after the preceding accepted watch.
+
 ## Search Functionality
 
-The append-only tables are `stream_events`, `recommendation_serves`, `llm_usage`,
-`data_quality_logs`, and `model_logs`.
+The append-only tables are `stream_events`, `licensing_costs`,
+`recommendation_serves`, `llm_usage`, `data_quality_logs`, and `model_logs`.
 
 Immutable interaction records can be searched in bounded pages. One intended use is
 a daily incremental job. In that case, use the stream event storage time so late
@@ -139,9 +143,9 @@ The system requires initial data, which is provided by the existing CSV snapshot
 
 `roll_up.py` is exclusively for the initial users, movies, and events snapshot. It
 inserts missing users and movies without replacing existing source data, derives
-`user_movie_history`, uses deterministic event IDs, and is safe to rerun. Its JSON
-report includes created counts and skipped IDs. Live services and Kafka consumers
-must use the interaction API instead.
+`user_movie_history` and `licensing_costs`, uses deterministic event IDs, and is
+safe to rerun. Its JSON report includes created counts and skipped IDs. Live
+services and Kafka consumers must use the interaction API instead.
 
 ```sh
 docker compose --profile tools run --rm database-roll-up
