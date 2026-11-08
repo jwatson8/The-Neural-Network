@@ -135,7 +135,12 @@ def create_app(model=None, profile_store=None, config=None):
         )
         if errors:
             log_validation_failure('recommendation_api', errors)
-            return jsonify(error='Bad Request', message='Invalid recommendation request'), 400
+            message = (
+                'user_id must not be blank'
+                if any(error.get('loc') == ('user_id',) for error in errors)
+                else 'Invalid recommendation request'
+            )
+            return jsonify(error='Bad Request', message=message), 400
         user_id = validated_request['user_id']
 
         request_received_at = datetime.now(UTC)

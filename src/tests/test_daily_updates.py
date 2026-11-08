@@ -152,7 +152,7 @@ class PipelineTests(unittest.TestCase):
              patch('src.model_updates.daily.fit', wraps=fit) as training:
             report = run(self.day, self.root, self.data, self.snapshot)
         self.assertEqual(report['status'], 'awaiting_approval')
-           self.assertEqual(self.drift_logger.call_count, 2)
+        self.assertEqual(self.drift_logger.call_count, 2)
         self.assertEqual(len(training.call_args_list[0].args[0]), 2)
         self.assertEqual(len(training.call_args_list[1].args[0]), 3)
         self.assertEqual(joblib.load(self.root/'model.joblib')['update_metadata']['version'], 'baseline')

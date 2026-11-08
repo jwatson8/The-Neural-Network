@@ -57,6 +57,11 @@ class GrafanaProvisioningTests(unittest.TestCase):
         self.assertEqual(summary_query["url"], "http://api:8082/database/summary")
         self.assertEqual(summary_query["url_options"]["method"], "GET")
         self.assertEqual(summary_query["uql"], 'parse-json | project kv("tables")')
+        summary_overrides = summary_panel["fieldConfig"]["overrides"]
+        self.assertEqual(
+            [override["properties"][0]["value"] for override in summary_overrides],
+            ["Table", "Rows"],
+        )
         queries = " ".join(
             target["rawSql"]
             for panel in dashboard["panels"]

@@ -202,9 +202,12 @@
       "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "data-view-api"},
       "fieldConfig": {
         "defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "unit": "short"},
-        "overrides": []
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "key"}, "properties": [{"id": "displayName", "value": "Table"}]},
+          {"matcher": {"id": "byName", "options": "value"}, "properties": [{"id": "displayName", "value": "Rows"}]}
+        ]
       },
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 31},
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 31},
       "id": 8,
       "options": {"cellHeight": "sm", "showHeader": true},
       "targets": [
