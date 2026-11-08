@@ -777,7 +777,7 @@ class DatabaseInteractionTests(unittest.TestCase):
                 stream.write(
                     "movie_id,title,genres,release_date,runtime,original_language,overview,"
                     "popularity,vote_average,vote_count,imdb_id,tmdb_id,license_cost\n"
-                    "movie-1,Movie,Drama,2020-01-01,90,en,Story,1.2,7.0,10,tt1,1,0.1\n"
+                    "movie-1,Movie,Drama,2020-01-01,90,en,Story,1.2,7.0,10,tt1,1,0.0068199066\n"
                 )
             (data_dir / "events.csv").write_text(
                 "timestamp,user_id,event_type,movie_id,rating\n"
@@ -811,7 +811,7 @@ class DatabaseInteractionTests(unittest.TestCase):
             self.assertEqual(len(session.exec(select(StreamEvent)).all()), 2)
             charges = list(session.exec(select(LicensingCost)).all())
             self.assertEqual(len(charges), 1)
-            self.assertEqual(charges[0].license_cost, Decimal("0.1"))
+            self.assertEqual(charges[0].license_cost, Decimal("0.0068199066"))
 
 
 if __name__ == "__main__":
