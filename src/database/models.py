@@ -194,7 +194,18 @@ class UserMovieHistory(SQLModel, table=True):
             "latest_rating IS NULL OR (latest_rating >= 1 AND latest_rating <= 10)",
             name="ck_history_latest_rating",
         ),
-        Index("ix_user_movie_history_stored_at", "stored_at"),
+        CheckConstraint(
+            "last_recorded_watch_at IS NOT NULL OR last_recorded_rating_at IS NOT NULL",
+            name="ck_history_has_activity",
+        ),
+        CheckConstraint(
+            "(last_recorded_rating_at IS NULL AND latest_rating IS NULL AND "
+            "rating_changed = FALSE) OR "
+            "(last_recorded_rating_at IS NOT NULL AND latest_rating IS NOT NULL)",
+            name="ck_history_rating_state",
+        ),
+        Index("ix_user_movie_history_last_watch", "last_recorded_watch_at"),
+        Index("ix_user_movie_history_last_rating", "last_recorded_rating_at"),
     )
 
     user_id: str = Field(primary_key=True, foreign_key="users.user_id", max_length=255)
@@ -202,9 +213,13 @@ class UserMovieHistory(SQLModel, table=True):
         primary_key=True, foreign_key="movies.movie_id", max_length=255
     )
     latest_rating: float | None = Field(default=None, ge=1, le=10)
-    stored_at: datetime = Field(
-        default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
+    last_recorded_watch_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
     )
+    last_recorded_rating_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )
+    rating_changed: bool = Field(default=False, nullable=False)
 
 
 class RecommendationServe(SQLModel, table=True):

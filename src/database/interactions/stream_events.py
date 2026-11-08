@@ -31,7 +31,11 @@ __all__ = ["create", "get", "list_records", "create_many", "search"]
 
 
 def _create(session: Session, data: StreamEventCreate) -> StreamEvent:
-    return create_record(session, StreamEvent, schema_values(data))
+    event = create_record(session, StreamEvent, schema_values(data))
+    from src.database.interactions.user_movie_history import _apply_event_to_history
+
+    _apply_event_to_history(session, event)
+    return event
 
 
 def _get(session: Session, event_id: UUID) -> StreamEvent | None:
@@ -95,8 +99,23 @@ def _create_many(session: Session, records: list[StreamEventCreate]) -> int:
             StreamEvent.event_id
         )
     )
+    inserted_ids = set(result.scalars().all())
     session.flush()
-    return len(result.scalars().all())
+    from src.database.interactions.user_movie_history import _apply_event_to_history
+
+    materialized_ids = set()
+    inserted_events = []
+    for event in values:
+        event_id = event["event_id"]
+        if event_id in inserted_ids and event_id not in materialized_ids:
+            inserted_events.append(StreamEvent.model_construct(**event))
+            materialized_ids.add(event_id)
+    for event in sorted(
+        inserted_events,
+        key=lambda record: (record.event_time, record.event_id.int),
+    ):
+        _apply_event_to_history(session, event)
+    return len(inserted_ids)
 
 
 ### ----------- Individual Functions -----------

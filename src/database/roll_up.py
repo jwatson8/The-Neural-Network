@@ -13,7 +13,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
-from src.database.interactions import movies, stream_events, user_movie_history, users
+from src.database.interactions import movies, stream_events, users
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[1] / "app" / "data"
 
@@ -84,7 +84,7 @@ def roll_up(data_dir: Path, *, chunk_size: int = 1000) -> dict[str, object]:
     skipped_movie_ids = movies.create_missing_many(movie_rows)
 
     event_rows = []
-    history: dict[tuple[str, str], dict[str, object]] = {}
+    history_keys: set[tuple[str, str]] = set()
     inserted_events = 0
     for row_number, row in enumerate(
         _rows(_source_path(data_dir, "events")), start=1
@@ -92,21 +92,12 @@ def roll_up(data_dir: Path, *, chunk_size: int = 1000) -> dict[str, object]:
         event = {**row, "event_id": _event_id(row_number, row)}
         event_rows.append(event)
         if row["movie_id"]:
-            key = (row["user_id"], row["movie_id"])
-            history.setdefault(
-                key,
-                {"user_id": key[0], "movie_id": key[1], "latest_rating": None},
-            )
-            if row["event_type"] == "rating":
-                history[key]["latest_rating"] = row["rating"]
+            history_keys.add((row["user_id"], row["movie_id"]))
         if len(event_rows) == chunk_size:
             inserted_events += stream_events.create_many(event_rows)
             event_rows = []
     if event_rows:
         inserted_events += stream_events.create_many(event_rows)
-    for chunk in _chunks(list(history.values()), chunk_size):
-        user_movie_history.upsert_many(chunk)
-
     return {
         "users": {
             "created": len(user_rows) - len(skipped_user_ids),
@@ -117,7 +108,7 @@ def roll_up(data_dir: Path, *, chunk_size: int = 1000) -> dict[str, object]:
             "skipped_ids": skipped_movie_ids,
         },
         "events_inserted": inserted_events,
-        "history": len(history),
+        "history": len(history_keys),
     }
 
 

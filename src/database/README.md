@@ -64,7 +64,14 @@ inserted_count = stream_events.create_many(normalized_events)
 ```
 
 The batch is written in one transaction. Duplicate event UUIDs are skipped, and the
-function returns the number of newly inserted events.
+function returns the number of newly inserted events. Newly inserted watch and
+rating events update `user_movie_history` in the same transaction. Application
+callers write through `stream_events`; `user_movie_history` exposes read operations.
+
+Each history row records `last_recorded_watch_at`, `last_recorded_rating_at`, the
+latest rating, and whether the most recent accepted rating changed its predecessor.
+Older and equal-time events remain in `stream_events` but do not regress the
+materialized history row.
 
 ## Search Functionality
 

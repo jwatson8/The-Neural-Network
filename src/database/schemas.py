@@ -212,13 +212,6 @@ class RecommendationServeCreate(DatabaseSchema):
         return self
 
 
-class UserMovieHistoryUpsert(DatabaseSchema):
-    user_id: str = Field(min_length=1, max_length=255)
-    movie_id: str = Field(min_length=1, max_length=255)
-    latest_rating: float | None = Field(default=None, ge=1, le=10)
-    stored_at: datetime | None = None
-
-
 class LLMUsageCreate(DatabaseSchema):
     request_id: UUID | None = None
     user_id: str | None = Field(default=None, max_length=255)

@@ -13,8 +13,8 @@ EX:
     )
 
 Use ``create_many`` for immutable event batches and ``create_missing_many`` when
-loading users or movies without replacing records already present. Derived current
-state, such as user/movie history, exposes explicit upsert operations. Append-only
+loading users or movies without replacing records already present. User/movie
+history is derived atomically from immutable watch and rating events. Append-only
 modules expose no update operation and provide cursor-based ``search`` functions
 for bounded offline reads. Functions prefixed with an underscore are private
 transaction implementations and must not be imported by application code. Validation

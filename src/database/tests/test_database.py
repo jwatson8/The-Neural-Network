@@ -9,7 +9,10 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from sqlalchemy import inspect as sqlalchemy_inspect
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.schema import CreateTable
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from src.database.database import get_database_url
@@ -25,7 +28,7 @@ from src.database.interactions import (
     user_movie_history,
     users,
 )
-from src.database.models import StreamEvent, User
+from src.database.models import StreamEvent, User, UserMovieHistory
 from src.database.roll_up import roll_up
 from src.database.schemas import StreamEventCreate, UserCreate
 
@@ -81,9 +84,6 @@ class DatabaseInteractionTests(unittest.TestCase):
             rating=8,
         )
         movies.update("movie-1", title="Updated", overview=None)
-        user_movie_history.upsert(
-            user_id="user-1", movie_id="movie-1", latest_rating=8
-        )
 
         self.assertEqual(movie.title, "Initial title")
         self.assertEqual(event.rating, 8)
@@ -99,14 +99,26 @@ class DatabaseInteractionTests(unittest.TestCase):
         movies.create(movie_id="movie-2", title="Second movie")
         movies.create(movie_id="movie-3", title="Third movie")
         users.create(user_id="user-2")
-        user_movie_history.upsert(
-            user_id="user-1", movie_id="movie-2", latest_rating=7
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-2",
+            event_type="rating",
+            event_time=self.now,
+            rating=7,
         )
-        user_movie_history.upsert(
-            user_id="user-1", movie_id="movie-1", latest_rating=9
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            event_time=self.now,
+            rating=9,
         )
-        user_movie_history.upsert(
-            user_id="user-2", movie_id="movie-3", latest_rating=5
+        stream_events.create(
+            user_id="user-2",
+            movie_id="movie-3",
+            event_type="rating",
+            event_time=self.now,
+            rating=5,
         )
 
         history = user_movie_history.get_user_history("user-1")
@@ -115,6 +127,182 @@ class DatabaseInteractionTests(unittest.TestCase):
         self.assertEqual([row.latest_rating for row in history], [9, 7])
         self.assertTrue(all(row.user_id == "user-1" for row in history))
         self.assertEqual(user_movie_history.get_user_history("missing"), [])
+
+    def test_history_tracks_latest_watch_rating_and_rating_change(self):
+        self.seed_catalog()
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="watch",
+            event_time=start,
+            minute_index=12,
+        )
+        watch = user_movie_history.get("user-1", "movie-1")
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            rating=7,
+            event_time=start + timedelta(minutes=1),
+        )
+        first_rating = user_movie_history.get("user-1", "movie-1")
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            rating=7,
+            event_time=start + timedelta(minutes=2),
+        )
+        same_rating = user_movie_history.get("user-1", "movie-1")
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            rating=9,
+            event_time=start + timedelta(minutes=3),
+        )
+        changed_rating = user_movie_history.get("user-1", "movie-1")
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="watch",
+            event_time=start + timedelta(minutes=4),
+        )
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            event_time=start - timedelta(minutes=1),
+            rating=2,
+        )
+        stream_events.create(
+            user_id="user-1",
+            movie_id="movie-1",
+            event_type="rating",
+            event_time=start + timedelta(minutes=3),
+            rating=4,
+        )
+        history = user_movie_history.get("user-1", "movie-1")
+
+        self.assertIsNone(watch.latest_rating)
+        self.assertFalse(first_rating.rating_changed)
+        self.assertFalse(same_rating.rating_changed)
+        self.assertTrue(changed_rating.rating_changed)
+        self.assertEqual(history.latest_rating, 9)
+        self.assertTrue(history.rating_changed)
+        self.assertEqual(
+            history.last_recorded_watch_at.replace(tzinfo=UTC),
+            start + timedelta(minutes=4),
+        )
+        self.assertEqual(
+            history.last_recorded_rating_at.replace(tzinfo=UTC),
+            start + timedelta(minutes=3),
+        )
+        self.assertEqual(len(stream_events.list_records()), 7)
+
+    def test_history_batch_is_ordered_and_duplicate_events_are_ignored(self):
+        self.seed_catalog()
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+        records = [
+            {
+                "event_id": uuid4(),
+                "user_id": "user-1",
+                "movie_id": "movie-1",
+                "event_type": "rating",
+                "event_time": start + timedelta(minutes=3),
+                "rating": 9,
+            },
+            {
+                "event_id": uuid4(),
+                "user_id": "user-1",
+                "movie_id": "movie-1",
+                "event_type": "watch",
+                "event_time": start + timedelta(minutes=2),
+            },
+            {
+                "event_id": uuid4(),
+                "user_id": "user-1",
+                "movie_id": "movie-1",
+                "event_type": "rating",
+                "event_time": start + timedelta(minutes=1),
+                "rating": 5,
+            },
+        ]
+
+        self.assertEqual(stream_events.create_many(records), 3)
+        self.assertEqual(stream_events.create_many(records), 0)
+        history = user_movie_history.get("user-1", "movie-1")
+
+        self.assertEqual(history.latest_rating, 9)
+        self.assertTrue(history.rating_changed)
+        self.assertEqual(
+            history.last_recorded_watch_at.replace(tzinfo=UTC),
+            start + timedelta(minutes=2),
+        )
+
+        movies.create(movie_id="movie-2", title="Second movie")
+        duplicate_id = uuid4()
+        duplicate_records = [
+            {
+                "event_id": duplicate_id,
+                "user_id": "user-1",
+                "movie_id": "movie-2",
+                "event_type": "rating",
+                "event_time": start,
+                "rating": 4,
+            },
+            {
+                "event_id": duplicate_id,
+                "user_id": "user-1",
+                "movie_id": "movie-2",
+                "event_type": "rating",
+                "event_time": start + timedelta(minutes=5),
+                "rating": 10,
+            },
+        ]
+        self.assertEqual(stream_events.create_many(duplicate_records), 1)
+        self.assertEqual(
+            user_movie_history.get("user-1", "movie-2").latest_rating, 4
+        )
+
+    def test_stream_event_and_history_update_roll_back_together(self):
+        self.seed_catalog()
+        event_id = uuid4()
+        with patch(
+            "src.database.interactions.user_movie_history._apply_event_to_history",
+            side_effect=RuntimeError("history unavailable"),
+        ):
+            with self.assertRaises(RuntimeError):
+                stream_events.create(
+                    event_id=event_id,
+                    user_id="user-1",
+                    movie_id="movie-1",
+                    event_type="watch",
+                    event_time=self.now,
+                )
+
+        self.assertIsNone(stream_events.get(event_id))
+        self.assertIsNone(user_movie_history.get("user-1", "movie-1"))
+
+    def test_history_database_constraints_reject_empty_activity(self):
+        with Session(self.engine) as session:
+            session.add(UserMovieHistory(user_id="user-1", movie_id="movie-1"))
+            with self.assertRaises(IntegrityError):
+                session.commit()
+
+    def test_history_postgres_ddl_uses_event_timestamps(self):
+        ddl = str(
+            CreateTable(UserMovieHistory.__table__).compile(
+                dialect=postgresql.dialect()
+            )
+        )
+
+        self.assertIn("last_recorded_watch_at TIMESTAMP WITH TIME ZONE", ddl)
+        self.assertIn("last_recorded_rating_at TIMESTAMP WITH TIME ZONE", ddl)
+        self.assertIn("ck_history_rating_state", ddl)
+        self.assertNotIn("stored_at", ddl)
 
     def test_raw_csv_event_normalization_and_validation(self):
         event = StreamEventCreate.model_validate(
@@ -438,7 +626,15 @@ class DatabaseInteractionTests(unittest.TestCase):
         )
         self.assertEqual(first["events_inserted"], 2)
         self.assertEqual(second["events_inserted"], 0)
-        self.assertEqual(user_movie_history.get("1", "movie-1").latest_rating, 8)
+        history = user_movie_history.get("1", "movie-1")
+        self.assertEqual(history.latest_rating, 8)
+        self.assertFalse(history.rating_changed)
+        self.assertEqual(
+            history.last_recorded_watch_at, datetime(2025, 1, 1, 0, 0)
+        )
+        self.assertEqual(
+            history.last_recorded_rating_at, datetime(2025, 1, 1, 0, 1)
+        )
         with Session(self.engine) as session:
             self.assertEqual(len(session.exec(select(StreamEvent)).all()), 2)
 
