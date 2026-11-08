@@ -8,7 +8,11 @@ from src.database.models import (
     ColdStartJob,
     ColdStartProfile,
     CourseRequest,
+    DataQualityLog,
+    LicensingCost,
     LLMUsage,
+    ModelLog,
+    MonitoringRun,
     Movie,
     RecommendationServe,
     StreamEvent,
@@ -28,6 +32,10 @@ TABLES = {
     "llm_usage": LLMUsage,
     "cold_start_profiles": ColdStartProfile,
     "cold_start_jobs": ColdStartJob,
+    "data_quality_logs": DataQualityLog,
+    "licensing_costs": LicensingCost,
+    "model_logs": ModelLog,
+    "monitoring_runs": MonitoringRun,
 }
 
 

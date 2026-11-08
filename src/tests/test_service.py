@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 import numpy as np
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, create_engine
 
@@ -112,13 +113,14 @@ class ServiceTests(unittest.TestCase):
         self.assertGreaterEqual(audit['serve_duration_ms'], 0)
         self.assertLessEqual(len(audit['recommendations']), 20)
 
-    def test_database_audit_failure_does_not_fail_recommendation(self):
-        self.create_recommendation_serve.side_effect = RuntimeError('database unavailable')
+    def test_database_audit_failure_returns_service_unavailable(self):
+        self.create_recommendation_serve.side_effect = SQLAlchemyError('database unavailable')
 
         response = self.client.get('/recommend/warm')
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.get_data(as_text=True).split(',')), 20)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()['error'], 'Service Unavailable')
+        self.assertNotIn('database unavailable', response.get_data(as_text=True))
 
     def test_blank_user_id_returns_bad_request_json(self):
         response = self.client.get('/recommend/%20%20')
@@ -140,6 +142,7 @@ class ServiceTests(unittest.TestCase):
         counts = response.get_json()['tables']
         self.assertEqual(counts['users'], 1)
         self.assertIn('cold_start_jobs', counts)
+        self.assertEqual(set(counts), set(SQLModel.metadata.tables))
         self.assertNotIn('summary-user', response.get_data(as_text=True))
 
     def test_public_cold_start_jobs_are_paginated_and_sanitized(self):

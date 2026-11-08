@@ -683,11 +683,7 @@ class DatabaseInteractionTests(unittest.TestCase):
 
         self.assertEqual(counts["users"], 1)
         self.assertEqual(counts["movies"], 1)
-        self.assertEqual(set(counts), {
-            "users", "movies", "stream_events", "course_requests",
-            "user_movie_history", "recommendation_serves", "llm_usage",
-            "cold_start_profiles", "cold_start_jobs",
-        })
+        self.assertEqual(set(counts), set(SQLModel.metadata.tables))
 
     def test_create_missing_batches_reject_invalid_or_duplicate_ids_atomically(self):
         with self.assertRaisesRegex(ValueError, "Duplicate user_id values: duplicate"):

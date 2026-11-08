@@ -64,6 +64,11 @@ def create_app(model=None, profile_store=None, config=None):
     def handle_http_error(error):
         return jsonify(error=error.name, message=error.description), error.code
 
+    @app.errorhandler(SQLAlchemyError)
+    def handle_database_error(error):
+        logger.exception('database_request_failed')
+        return jsonify(error='Service Unavailable', message='The database is temporarily unavailable'), 503
+
     @app.errorhandler(Exception)
     def handle_unexpected_error(error):
         logger.exception('unhandled_api_error')
@@ -147,22 +152,16 @@ def create_app(model=None, profile_store=None, config=None):
                 movie_ids, route = result
 
         elapsed_ms = (time.perf_counter() - started) * 1000
-        try:
-            users.create_missing_many([{'user_id': user_id}])
-            recommendation_serves.create(
-                user_id=user_id,
-                served_at=datetime.now(UTC),
-                model_route=route,
-                model_version=app.config['MODEL_VERSION'],
-                recommendations=[{'movie_id': movie_id} for movie_id in movie_ids],
-                request_received_at=request_received_at,
-                serve_duration_ms=elapsed_ms,
-            )
-        except Exception as error:
-            logger.warning(
-                'recommendation_db_audit_failed user_id=%s error_type=%s',
-                user_id, type(error).__name__,
-            )
+        users.create_missing_many([{'user_id': user_id}])
+        recommendation_serves.create(
+            user_id=user_id,
+            served_at=datetime.now(UTC),
+            model_route=route,
+            model_version=app.config['MODEL_VERSION'],
+            recommendations=[{'movie_id': movie_id} for movie_id in movie_ids],
+            request_received_at=request_received_at,
+            serve_duration_ms=elapsed_ms,
+        )
         logger.info(
             'recommendation user_id=%s route=%s model_version=%s duration_ms=%.2f status=200',
             user_id, route, app.config['MODEL_VERSION'], elapsed_ms,
