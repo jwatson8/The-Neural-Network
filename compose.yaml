@@ -52,6 +52,14 @@ services:
     depends_on:
       database-init: {condition: service_completed_successfully}
 
+  monitoring-worker:
+    <<: *service
+    profiles: [monitoring]
+    command: [python, -m, src.monitoring.monitoring_worker]
+    environment: *database-connection
+    depends_on:
+      database-init: {condition: service_completed_successfully}
+
   train:
     <<: *service
     profiles: [tools]

@@ -16,9 +16,20 @@ class DatabaseSchema(SQLModel):
 
 class DataQualityLogCreate(DatabaseSchema):
     occurred_at: datetime | None = None
-    source: Literal["kafka", "user_api", "movie_api", "recommendation_api", "drift"]
+    source: Literal[
+        "kafka",
+        "user_api",
+        "movie_api",
+        "recommendation_api",
+        "drift",
+        "monitoring",
+    ]
     severity: Literal["INFO", "WARNING", "ERROR"]
-    issue_type: Literal["validation_failure", "drift_result"]
+    issue_type: Literal[
+        "validation_failure",
+        "drift_result",
+        "monitoring_run_failure",
+    ]
     error_details: list[dict] = Field(default_factory=list)
     log_metadata: dict = Field(default_factory=dict)
     user_id: str | None = Field(default=None, min_length=1, max_length=255)
