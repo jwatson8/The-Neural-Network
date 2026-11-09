@@ -129,7 +129,14 @@ def main():
     try:
         while True:
             batch = consumer.poll(timeout_ms=1000)
-            counts = {'account': 0, 'recommendation': 0, 'invalid': 0, 'ignored': 0}
+            counts = {
+                'account': 0,
+                'recommendation': 0,
+                'watch': 0,
+                'rating': 0,
+                'invalid': 0,
+                'ignored': 0,
+            }
             for records in batch.values():
                 for record in records:
                     kind = handle_line(store, record.topic, record.partition, record.offset,
@@ -137,10 +144,15 @@ def main():
                     counts[kind] += 1
             if batch:
                 consumer.commit()
-            if counts['account'] or counts['recommendation'] or counts['invalid']:
+            logged_kinds = (
+                'account', 'recommendation', 'watch', 'rating', 'invalid'
+            )
+            if any(counts[kind] for kind in logged_kinds):
                 logger.info(
-                    'course_events accounts=%d recommendations=%d invalid=%d',
-                    counts['account'], counts['recommendation'], counts['invalid'],
+                    'course_events accounts=%d recommendations=%d '
+                    'watches=%d ratings=%d invalid=%d',
+                    counts['account'], counts['recommendation'], counts['watch'],
+                    counts['rating'], counts['invalid'],
                 )
     finally:
         consumer.close()

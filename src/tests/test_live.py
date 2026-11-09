@@ -3,7 +3,7 @@ import time
 import unittest
 from datetime import UTC, datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import call, patch
+from unittest.mock import Mock, call, patch
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import StaticPool
@@ -23,7 +23,7 @@ from src.database.interactions import (
     users,
 )
 from src.service.cold_start import recommend_cold_start
-from src.service.course_stream import handle_line
+from src.service.course_stream import handle_line, main
 from src.service.profile_worker import PreferenceProfile, process_one
 from src.service.store import ProfileStore
 from src.tests.test_service import make_model
@@ -93,6 +93,49 @@ class LiveTests(unittest.TestCase):
         self.assertEqual(history.latest_rating, 8)
         self.assertIsNotNone(history.last_recorded_watch_at)
         self.assertEqual(len(licensing_costs.search(user_id="501").records), 1)
+
+    def test_consumer_counts_logs_and_commits_watch_and_rating_events(self):
+        records = [
+            SimpleNamespace(
+                topic="topic",
+                partition=0,
+                offset=10,
+                value=b"2026-10-11T12:00:00Z,501,watch,live-movie,",
+            ),
+            SimpleNamespace(
+                topic="topic",
+                partition=0,
+                offset=11,
+                value=b"2026-10-11T12:30:00Z,501,rating,live-movie,8",
+            ),
+        ]
+        consumer = SimpleNamespace(
+            poll=Mock(side_effect=[{("topic", 0): records}, RuntimeError("stop")]),
+            commit=Mock(),
+            close=Mock(),
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "KAFKA_BOOTSTRAP_SERVERS": "localhost:9092",
+                "KAFKA_TOPIC": "topic",
+                "KAFKA_GROUP_ID": "test-group",
+            },
+        ), patch("src.service.course_stream.KafkaConsumer", return_value=consumer), patch(
+            "src.service.course_stream.ProfileStore"
+        ) as store_factory, patch("src.service.course_stream.logger.info") as log_info:
+            store_factory.return_value.record_movie_event.return_value = (True, [])
+            with self.assertRaisesRegex(RuntimeError, "stop"):
+                main()
+
+        consumer.commit.assert_called_once_with()
+        consumer.close.assert_called_once_with()
+        activity_logs = [call.args for call in log_info.call_args_list]
+        event_log = next(
+            args for args in activity_logs if args[0].startswith("course_events")
+        )
+        self.assertIn("watches=%d ratings=%d", event_log[0])
+        self.assertEqual(event_log[3:5], (1, 1))
 
     def test_unknown_movie_stream_event_is_logged_and_not_persisted(self):
         result = handle_line(
