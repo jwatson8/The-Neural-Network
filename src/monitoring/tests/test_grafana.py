@@ -45,10 +45,15 @@ class GrafanaProvisioningTests(unittest.TestCase):
         panel_titles = {panel["title"] for panel in dashboard["panels"]}
 
         self.assertEqual(dashboard["uid"], "monitoring-overview")
-        self.assertEqual(len(dashboard["panels"]), 7)
+        self.assertEqual(len(dashboard["panels"]), 8)
         self.assertIn("Successful Run Freshness", panel_titles)
         self.assertIn("Monitoring Failures", panel_titles)
-
+        self.assertIn(
+            "Model Accuracy by Route/Version: Rolling 24-Hour", panel_titles
+        )
+        self.assertIn(
+            "Attributed Ratings by Route/Version: Rolling 24-Hour", panel_titles
+        )
         data_view = json.loads(
             (GRAFANA_ROOT / "dashboards" / "application-data.json").read_text()
         )
@@ -73,7 +78,9 @@ class GrafanaProvisioningTests(unittest.TestCase):
             if "rawSql" in target
         )
         self.assertIn("INTERVAL '5 minutes'", queries)
-        self.assertIn("Rolling 24-hour accuracy", queries)
+        self.assertIn("monitoring_model_accuracy", queries)
+        self.assertIn("PARTITION BY model_route, model_version", queries)
+        self.assertNotIn("5-minute accuracy", queries)
         self.assertNotIn("$__timeFrom() - INTERVAL", queries)
         self.assertIn("CAST($__timeFrom() AS timestamptz)", queries)
 
@@ -86,6 +93,7 @@ class GrafanaProvisioningTests(unittest.TestCase):
         self.assertIn("uid: monitoring-postgres", datasource)
         self.assertIn("password: $__env{GRAFANA_DB_PASSWORD}", datasource)
         self.assertIn("path: /etc/grafana/dashboards", provider)
+        self.assertIn("monitoring_model_accuracy", provision_reader.READABLE_TABLES)
         data_view = (
             GRAFANA_ROOT / "provisioning" / "datasources" / "data-view.yaml"
         ).read_text()

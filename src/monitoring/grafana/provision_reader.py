@@ -7,7 +7,11 @@ from psycopg import sql
 from src.database.database import get_engine
 
 READER_ROLE = "grafana_reader"
-READABLE_TABLES = ("monitoring_runs", "data_quality_logs")
+READABLE_TABLES = (
+    "monitoring_runs",
+    "monitoring_model_accuracy",
+    "data_quality_logs",
+)
 
 
 def _required_secret(name: str) -> str:

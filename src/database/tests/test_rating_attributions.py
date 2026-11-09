@@ -61,6 +61,8 @@ class RatingAttributionReadTests(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertTrue(rows[0].attributed)
+        self.assertEqual(rows[0].models[0].model_route, "test")
+        self.assertEqual(rows[0].models[0].model_version, "m1")
 
     def test_rejects_wrong_movie_and_future_serve(self):
         with Session(self.engine) as session:
@@ -100,6 +102,55 @@ class RatingAttributionReadTests(unittest.TestCase):
         )
 
         self.assertFalse(rows[0].attributed)
+        self.assertEqual(rows[0].models, ())
+
+    def test_credits_distinct_models_once_and_lists_active_serves(self):
+        with Session(self.engine) as session:
+            session.add(User(user_id="user-1"))
+            session.add(Movie(movie_id="movie-1", title="Movie"))
+            for route, version, minutes in (
+                ("llm_content", "m1", 20),
+                ("llm_content", "m1", 10),
+                ("collaborative_svd", "m2", 5),
+            ):
+                served_at = self.start - timedelta(minutes=minutes)
+                session.add(
+                    RecommendationServe(
+                        user_id="user-1",
+                        served_at=served_at,
+                        request_received_at=served_at,
+                        serve_duration_ms=0,
+                        model_route=route,
+                        model_version=version,
+                        recommendations=[{"movie_id": "movie-1"}],
+                    )
+                )
+            session.add(
+                StreamEvent(
+                    user_id="user-1",
+                    event_type="rating",
+                    movie_id="movie-1",
+                    event_time=self.start,
+                    rating=9,
+                )
+            )
+            session.commit()
+
+        rows = rating_attributions.search(
+            start=self.start,
+            end=self.start + timedelta(minutes=5),
+            attribution_hours=24,
+        )
+        serves = rating_attributions.search_model_serves(
+            start=self.start - timedelta(hours=1),
+            end=self.start,
+        )
+
+        self.assertEqual(
+            {(model.model_route, model.model_version) for model in rows[0].models},
+            {("llm_content", "m1"), ("collaborative_svd", "m2")},
+        )
+        self.assertEqual(len(serves), 3)
 
 
 if __name__ == "__main__":

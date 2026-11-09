@@ -5,6 +5,7 @@ Shared location for the team's Milestone 2 report sections. Add each write-up as
 ## Available sections
 
 - [Automated model updates](automated_model_updates.md)
+- [Continuous integration](continuous_integration.md)
 - [Online evaluation](online_evaluation.md)
 - [Online evaluation results and collection instructions](online_evaluation_results.md) — production measurements pending.
 
