@@ -18,6 +18,12 @@ Open `http://localhost:3000` and sign in as `GRAFANA_ADMIN_USER` (default
 `admin`) using `GRAFANA_ADMIN_PASSWORD`. The database reader password is only
 used by provisioned services and is never entered in the Grafana UI.
 
+The **Application Data View** dashboard shows application table counts from
+Flask's `GET /database/summary` endpoint through the provisioned Infinity
+datasource. It refreshes hourly to avoid repeating full-table counts on the
+30-second operational monitoring dashboard. It does not expand the PostgreSQL
+reader's permissions beyond the monitoring tables.
+
 View service logs with:
 
 ```sh

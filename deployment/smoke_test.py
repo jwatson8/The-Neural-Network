@@ -6,6 +6,15 @@ import urllib.parse
 import urllib.request
 
 import joblib
+from src.database.interactions import (
+    cold_start_jobs,
+    cold_start_profiles,
+    movies,
+    recommendation_serves,
+    stream_events,
+    user_movie_history,
+    users as user_records,
+)
 
 
 def main():
@@ -22,6 +31,13 @@ def main():
         unknown += '-new'
     with urllib.request.urlopen(base + '/health', timeout=2) as response:
         assert response.status == 200
+    assert user_records.get(known[0]) is not None, 'Seed users were not rolled up'
+    assert movies.get(str(model['movies'][0]['movie_id'])) is not None, 'Seed movies were not rolled up'
+    assert stream_events.search(user_id=known[0], limit=1).records, 'Seed stream events were not rolled up'
+    seen_index = next(iter(model['seen'][known[0]]))
+    seen_movie = str(model['movies'][seen_index]['movie_id'])
+    assert user_movie_history.get(known[0], seen_movie) is not None, 'User/movie history was not rolled up'
+    assert cold_start_profiles.get(cold[0]) is not None, 'Seed cold-start profiles were not inserted'
     outputs = []
     for category, users in [('warm', known), ('cached-cold', cold), ('unknown-fallback', [unknown])]:
         for uid in users:
@@ -40,6 +56,8 @@ def main():
             assert elapsed < 0.6, f'{uid}: response took {elapsed:.3f}s'
             outputs.append(body)
             print(f'PASS {category} user={uid} movies={len(ids)} elapsed_ms={elapsed * 1000:.1f}')
+    assert recommendation_serves.search(user_id=known[0], limit=1).records, 'Recommendation serves were not audited'
+    assert cold_start_jobs.get(unknown) is not None, 'Unknown users were not queued for profile generation'
     assert len(set(outputs[:3])) > 1, 'Warm sample received identical lists'
     print('PASS HTTP smoke checks. This does not test live LLM generation or course traffic.')
 

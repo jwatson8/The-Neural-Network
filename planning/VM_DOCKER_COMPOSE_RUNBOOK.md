@@ -1,11 +1,9 @@
 # VM deployment runbook for Milestone 1
 
-**Status: implementation plan and configuration templates, not a deployed service.**
-The existing M0 model is a command-line program. The team still needs to implement
-the HTTP adapter and live cold-start worker described below. Do not treat the
-Compose template as runnable until those modules and the model artifact exist.
-No VM commands have been executed or containers tested as part of this runbook.
-This plan does not choose the team's production model in advance of comparison.
+**Status: historical planning document.** The implemented service uses PostgreSQL;
+the runnable Compose configuration and current VM instructions are in
+[`compose.yaml`](../compose.yaml) and [`deployment/README.md`](../deployment/README.md).
+Do not copy the older SQLite-backed templates below.
 
 The course requires `http://VM_ADDRESS:8082/recommend/USER_ID` to return one ordered
 comma-separated line of up to 20 movie IDs within 600 ms. A working container alone
@@ -129,12 +127,11 @@ The request handler returns a fast fallback while work is pending, then uses the
 new profile without retraining or restarting the service. Never count pending
 fallback responses as personalized.
 
-For a small single-VM design, SQLite with WAL, short transactions and a busy timeout
-can store profiles and pending jobs in a shared Docker volume. All instances must
-use the same schema and atomic updates. The API initializes the schema before
-health succeeds; the worker then starts. A different shared store is acceptable
-if the team documents it. Saved M0 `llm_profiles.json` entries can seed the store,
-but they do not replace live profile generation.
+The implemented service stores profiles, pending jobs, stream events, and audit
+records in PostgreSQL through `src.database.interactions`. The API initializes the
+schema before health succeeds; the worker and Kafka consumer wait for API health.
+Saved M0 `llm_profiles.json` entries seed PostgreSQL but do not replace live profile
+generation.
 
 The current `recommender.py` needs an adapter change: it rejects profiles whose
 user ID is absent from the original fitted user list. The live content route must
@@ -210,7 +207,6 @@ x-runtime: &runtime
     - .env
   environment:
     MODEL_PATH: /models/model.joblib
-    PROFILE_DB_PATH: /state/profiles.sqlite3
     OPENBLAS_NUM_THREADS: "1"
     OMP_NUM_THREADS: "1"
     MKL_NUM_THREADS: "1"
@@ -221,7 +217,6 @@ x-runtime: &runtime
       read_only: true
       bind:
         create_host_path: false
-    - profiles:/state
   logging:
     driver: json-file
     options:
@@ -248,8 +243,6 @@ services:
       api:
         condition: service_healthy
 
-volumes:
-  profiles:
 ```
 
 The same image serves HTTP and runs the background worker, so dependencies stay

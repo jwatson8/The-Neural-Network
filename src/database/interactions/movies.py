@@ -4,7 +4,7 @@ from collections.abc import Iterable, Mapping
 from datetime import date
 from decimal import Decimal
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from src.database.interactions._shared import (
     UNSET,
@@ -16,9 +16,6 @@ from src.database.interactions._shared import (
     schema_values,
     supplied,
     update_record,
-)
-from src.database.interactions._shared import (
-    list_records as list_model_records,
 )
 from src.database.models import Movie
 from src.database.schemas import MovieCreate, MovieUpdate
@@ -41,7 +38,13 @@ def _update(session: Session, movie: Movie, data: MovieUpdate) -> Movie:
 
 
 def _list(session: Session, *, offset: int, limit: int) -> list[Movie]:
-    return list_model_records(session, Movie, offset=offset, limit=limit)
+    statement = (
+        select(Movie)
+        .order_by(Movie.movie_id)
+        .offset(offset)
+        .limit(min(limit, 1000))
+    )
+    return list(session.exec(statement).all())
 
 
 def _create_missing_many(session: Session, records: list[MovieCreate]) -> list[str]:

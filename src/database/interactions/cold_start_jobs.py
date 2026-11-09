@@ -15,7 +15,7 @@ from src.database.interactions._shared import (
 from src.database.models import ColdStartJob, utc_now
 from src.database.schemas import ColdStartJobCreate
 
-__all__ = ["enqueue", "claim", "retry", "complete"]
+__all__ = ["enqueue", "get", "list_records", "claim", "retry", "complete"]
 
 ### ----------- Helper Functions -----------
 
@@ -29,6 +29,28 @@ def _enqueue(session: Session, data: ColdStartJobCreate) -> ColdStartJob:
     session.execute(statement.on_conflict_do_nothing(index_elements=["user_id"]))
     session.flush()
     return session.get(ColdStartJob, data.user_id)
+
+
+def _get(session: Session, user_id: str) -> ColdStartJob | None:
+    return session.get(ColdStartJob, user_id)
+
+
+def _list(
+    session: Session,
+    *,
+    status: Literal["pending", "processing"] | None,
+    offset: int,
+    limit: int,
+) -> list[ColdStartJob]:
+    statement = select(ColdStartJob)
+    if status is not None:
+        statement = statement.where(ColdStartJob.status == status)
+    statement = (
+        statement.order_by(ColdStartJob.created_at, ColdStartJob.user_id)
+        .offset(offset)
+        .limit(min(limit, 1000))
+    )
+    return list(session.exec(statement).all())
 
 
 def _claim(session: Session, *, lease_seconds: int) -> ColdStartJob | None:
@@ -106,6 +128,29 @@ def enqueue(
     """
     data = ColdStartJobCreate(**locals())
     return run(lambda session: _enqueue(session, data))
+
+
+def get(user_id: str) -> ColdStartJob | None:
+    """Return a user's pending or processing cold-start job, or ``None``."""
+    return run(lambda session: _get(session, user_id))
+
+
+def list_records(
+    *,
+    status: Literal["pending", "processing"] | None = None,
+    offset: int = 0,
+    limit: int = 100,
+) -> list[ColdStartJob]:
+    """List cold-start jobs in stable creation order with optional status filtering."""
+    if offset < 0:
+        raise ValueError("offset must be non-negative")
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    return run(
+        lambda session: _list(
+            session, status=status, offset=offset, limit=limit
+        )
+    )
 
 
 def claim(*, lease_seconds: int = 60) -> ColdStartJob | None:

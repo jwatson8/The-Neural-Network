@@ -1,5 +1,6 @@
 """Immutable recommendation-serve audit interactions."""
 
+import time
 from datetime import datetime
 from uuid import UUID
 
@@ -26,8 +27,20 @@ __all__ = ["create", "get", "list_records", "search"]
 ### ----------- Helper Functions -----------
 
 
-def _create(session: Session, data: RecommendationServeCreate) -> RecommendationServe:
-    return create_record(session, RecommendationServe, schema_values(data))
+def _create(
+    session: Session,
+    data: RecommendationServeCreate,
+    request_started_at: float | None,
+) -> RecommendationServe:
+    record = create_record(session, RecommendationServe, schema_values(data))
+    if request_started_at is not None:
+        record.serve_duration_ms = max(
+            0.0, (time.perf_counter() - request_started_at) * 1000
+        )
+        session.add(record)
+        session.flush()
+        session.refresh(record)
+    return record
 
 
 def _get(session: Session, request_id: UUID) -> RecommendationServe | None:
@@ -84,15 +97,27 @@ def create(
     request_received_at: datetime,
     serve_duration_ms: float,
     request_id: UUID | None = None,
+    request_started_at: float | None = None,
 ) -> RecommendationServe:
     """Commit one served recommendation list in its original ranking order.
 
     ``recommendations`` contains one to twenty dictionaries/items with ``movie_id``
     and optional ``model_score``. Timing fields describe request receipt, completion,
-    and elapsed milliseconds; ``request_id`` is generated when omitted.
+    and elapsed milliseconds. ``request_started_at`` is an optional monotonic timer
+    origin; when supplied, duration is measured through the audit insert and refresh.
+    ``request_id`` is generated when omitted.
     """
-    data = RecommendationServeCreate(**locals())
-    return run(lambda session: _create(session, data))
+    data = RecommendationServeCreate(
+        user_id=user_id,
+        served_at=served_at,
+        model_route=model_route,
+        model_version=model_version,
+        recommendations=recommendations,
+        request_received_at=request_received_at,
+        serve_duration_ms=serve_duration_ms,
+        request_id=request_id,
+    )
+    return run(lambda session: _create(session, data, request_started_at))
 
 
 def get(request_id: UUID) -> RecommendationServe | None:

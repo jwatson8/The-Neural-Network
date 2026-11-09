@@ -48,10 +48,29 @@ class GrafanaProvisioningTests(unittest.TestCase):
         self.assertEqual(len(dashboard["panels"]), 7)
         self.assertIn("Successful Run Freshness", panel_titles)
         self.assertIn("Monitoring Failures", panel_titles)
+
+        data_view = json.loads(
+            (GRAFANA_ROOT / "dashboards" / "application-data.json").read_text()
+        )
+        self.assertEqual(data_view["uid"], "application-data-view")
+        self.assertEqual(data_view["refresh"], "1h")
+        self.assertEqual(len(data_view["panels"]), 1)
+        summary_panel = data_view["panels"][0]
+        self.assertEqual(summary_panel["title"], "Application Table Row Counts")
+        summary_query = summary_panel["targets"][0]
+        self.assertEqual(summary_query["url"], "http://api:8082/database/summary")
+        self.assertEqual(summary_query["url_options"]["method"], "GET")
+        self.assertEqual(summary_query["uql"], 'parse-json | project kv("tables")')
+        summary_overrides = summary_panel["fieldConfig"]["overrides"]
+        self.assertEqual(
+            [override["properties"][0]["value"] for override in summary_overrides],
+            ["Table", "Rows"],
+        )
         queries = " ".join(
             target["rawSql"]
             for panel in dashboard["panels"]
             for target in panel["targets"]
+            if "rawSql" in target
         )
         self.assertIn("INTERVAL '5 minutes'", queries)
         self.assertIn("Rolling 24-hour accuracy", queries)
@@ -67,6 +86,11 @@ class GrafanaProvisioningTests(unittest.TestCase):
         self.assertIn("uid: monitoring-postgres", datasource)
         self.assertIn("password: $__env{GRAFANA_DB_PASSWORD}", datasource)
         self.assertIn("path: /etc/grafana/dashboards", provider)
+        data_view = (
+            GRAFANA_ROOT / "provisioning" / "datasources" / "data-view.yaml"
+        ).read_text()
+        self.assertIn("uid: data-view-api", data_view)
+        self.assertIn("http://api:8082", data_view)
 
 
 if __name__ == "__main__":

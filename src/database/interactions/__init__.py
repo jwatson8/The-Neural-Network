@@ -26,8 +26,10 @@ those snapshots through ``licensing_costs``; callers do not create them directly
 """
 
 from src.database.interactions import (
+    course_requests,
     cold_start_jobs,
     cold_start_profiles,
+    database_summary,
     data_quality_logs,
     licensing_costs,
     llm_usage,
@@ -47,8 +49,10 @@ __all__ = [
     "RecordNotFoundError",
     "SearchCursor",
     "SearchPage",
+    "course_requests",
     "cold_start_jobs",
     "cold_start_profiles",
+    "database_summary",
     "data_quality_logs",
     "licensing_costs",
     "llm_usage",

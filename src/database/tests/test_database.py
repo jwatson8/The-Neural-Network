@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from sqlalchemy import inspect as sqlalchemy_inspect
+from sqlalchemy import BigInteger, inspect as sqlalchemy_inspect
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
@@ -21,6 +21,8 @@ from src.database.interactions import (
     RecordNotFoundError,
     cold_start_jobs,
     cold_start_profiles,
+    course_requests,
+    database_summary,
     licensing_costs,
     llm_usage,
     model_logs,
@@ -30,7 +32,13 @@ from src.database.interactions import (
     user_movie_history,
     users,
 )
-from src.database.models import LicensingCost, StreamEvent, User, UserMovieHistory
+from src.database.models import (
+    CourseRequest,
+    LicensingCost,
+    StreamEvent,
+    User,
+    UserMovieHistory,
+)
 from src.database.roll_up import roll_up
 from src.database.schemas import StreamEventCreate, UserCreate
 
@@ -62,7 +70,7 @@ class DatabaseInteractionTests(unittest.TestCase):
 
     def test_schema_and_database_url_configuration(self):
         inspector = sqlalchemy_inspect(self.engine)
-        self.assertEqual(len(inspector.get_table_names()), 12)
+        self.assertEqual(len(inspector.get_table_names()), 13)
         self.assertEqual(
             inspector.get_pk_constraint("user_movie_history")["constrained_columns"],
             ["user_id", "movie_id"],
@@ -660,6 +668,30 @@ class DatabaseInteractionTests(unittest.TestCase):
         self.assertEqual(movies.get("movie-2").title, "New title")
         self.assertEqual(users.create_missing_many([]), [])
 
+    def test_course_requests_are_deduplicated_by_kafka_offset(self):
+        record = {
+            "topic": "course-logs",
+            "partition_id": 2,
+            "offset_id": 2_147_483_648,
+            "raw_line": "2026-10-11T12:00:00Z,501,GET /create_account",
+        }
+
+        self.assertIsInstance(CourseRequest.__table__.c.offset_id.type, BigInteger)
+        self.assertTrue(course_requests.create(**record))
+        self.assertFalse(course_requests.create(**record))
+        self.assertEqual(
+            len(course_requests.list_records(limit=10)),
+            1,
+        )
+
+    def test_database_summary_counts_all_tables(self):
+        self.seed_catalog()
+        counts = database_summary.counts()
+
+        self.assertEqual(counts["users"], 1)
+        self.assertEqual(counts["movies"], 1)
+        self.assertEqual(set(counts), set(SQLModel.metadata.tables))
+
     def test_create_missing_batches_reject_invalid_or_duplicate_ids_atomically(self):
         with self.assertRaisesRegex(ValueError, "Duplicate user_id values: duplicate"):
             users.create_missing_many(
@@ -704,6 +736,7 @@ class DatabaseInteractionTests(unittest.TestCase):
             status="succeeded",
         )
         cold_start_jobs.enqueue(user_id="user-1")
+        self.assertIsNotNone(cold_start_jobs.get("user-1"))
         claimed = cold_start_jobs.claim(lease_seconds=30)
         cold_start_profiles.complete_generation(
             user_id="user-1",
@@ -716,6 +749,26 @@ class DatabaseInteractionTests(unittest.TestCase):
         self.assertEqual(claimed.attempts, 1)
         self.assertEqual(cold_start_profiles.get("user-1").positive, "mystery")
 
+    def test_recommendation_duration_can_include_audit_persistence(self):
+        users.create(user_id="timed-user")
+
+        with patch(
+            "src.database.interactions.recommendation_serves.time.perf_counter",
+            side_effect=[10.75],
+        ):
+            record = recommendation_serves.create(
+                user_id="timed-user",
+                served_at=self.now,
+                model_route="popularity_fallback",
+                model_version="test",
+                recommendations=[{"movie_id": "movie-1"}],
+                request_received_at=self.now,
+                serve_duration_ms=0,
+                request_started_at=10.0,
+            )
+
+        self.assertAlmostEqual(record.serve_duration_ms, 750)
+
     def test_low_level_session_supports_atomic_rollback(self):
         with Session(self.engine) as session:
             users._create(session, UserCreate(user_id="rolled-back"))
@@ -727,7 +780,7 @@ class DatabaseInteractionTests(unittest.TestCase):
         modules = (
             users, movies, stream_events, user_movie_history, licensing_costs,
             recommendation_serves, llm_usage, model_logs, cold_start_profiles,
-            cold_start_jobs,
+            cold_start_jobs, course_requests, database_summary,
         )
         functions = [getattr(module, name) for module in modules for name in module.__all__]
         for function in functions:
@@ -747,7 +800,7 @@ class DatabaseInteractionTests(unittest.TestCase):
                 stream.write(
                     "movie_id,title,genres,release_date,runtime,original_language,overview,"
                     "popularity,vote_average,vote_count,imdb_id,tmdb_id,license_cost\n"
-                    "movie-1,Movie,Drama,2020-01-01,90,en,Story,1.2,7.0,10,tt1,1,0.1\n"
+                    "movie-1,Movie,Drama,2020-01-01,90,en,Story,1.2,7.0,10,tt1,1,0.0068199066\n"
                 )
             (data_dir / "events.csv").write_text(
                 "timestamp,user_id,event_type,movie_id,rating\n"
@@ -781,7 +834,7 @@ class DatabaseInteractionTests(unittest.TestCase):
             self.assertEqual(len(session.exec(select(StreamEvent)).all()), 2)
             charges = list(session.exec(select(LicensingCost)).all())
             self.assertEqual(len(charges), 1)
-            self.assertEqual(charges[0].license_cost, Decimal("0.1"))
+            self.assertEqual(charges[0].license_cost, Decimal("0.0068199066"))
 
 
 if __name__ == "__main__":
