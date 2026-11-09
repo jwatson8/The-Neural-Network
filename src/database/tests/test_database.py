@@ -2,7 +2,6 @@ import gzip
 import inspect
 import os
 import tempfile
-import time
 import unittest
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
