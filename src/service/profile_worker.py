@@ -117,10 +117,14 @@ def process_one(store, client, model_name):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 estimated_cost_usd=(
-                    Decimal(input_tokens) * Decimal("0.15")
-                    + Decimal(output_tokens) * Decimal("0.60")
-                )
-                / Decimal("1000000"),
+                    (
+                        Decimal(input_tokens) * Decimal("0.15")
+                        + Decimal(output_tokens) * Decimal("0.60")
+                    )
+                    / Decimal("1000000")
+                    if usage is not None
+                    else None
+                ),
             )
             llm_request_id = usage_record.request_id
         else:
