@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from decimal import Decimal
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -84,13 +85,20 @@ def process_one(store, client, model_name):
             llm_called = True
             profile, usage = generate_profile(client, model_name, likes, dislikes)
             llm_succeeded = True
+            inputTokens = usage.input_tokens if usage else 0
+            outputTokens = usage.output_tokens if usage else 0
             usage_record = llm_usage.create(
                 user_id=user_id,
                 provider="openai",
                 model_name=model_name,
                 status="succeeded",
-                input_tokens=usage.input_tokens if usage else 0,
-                output_tokens=usage.output_tokens if usage else 0,
+                input_tokens=inputTokens,
+                output_tokens=outputTokens,
+                estimated_cost_usd=(
+                    Decimal(inputTokens) * Decimal("0.15")
+                    + Decimal(outputTokens) * Decimal("0.60")
+                )
+                / Decimal("1000000"),
             )
             llm_request_id = usage_record.request_id
         else:
