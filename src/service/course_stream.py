@@ -2,6 +2,7 @@
 import logging
 import os
 import re
+import csv
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -23,13 +24,45 @@ def _event_time(value):
 
 
 def handle_line(store, topic, partition, offset, line):
-    parts = line.strip().split(',', 2)
-    if len(parts) != 3:
+    basic_parts = line.strip().split(',', 2)
+    if len(basic_parts) != 3:
         return 'ignored'
-    _, user_id, event = [part.strip() for part in parts]
+    timestamp, user_id, raw_event = [part.strip() for part in basic_parts]
+    event = raw_event.split(',', 1)[0].strip()
+    if event in ('watch', 'rating'):
+        try:
+            parts = next(csv.reader([line], strict=True))
+        except csv.Error:
+            log_validation_failure(
+                'kafka',
+                [{'loc': ('record',), 'type': 'value_error', 'msg': 'Invalid CSV record'}],
+            )
+            return 'invalid'
+        if len(parts) != 5:
+            return 'invalid'
+        try:
+            event_time = _event_time(timestamp)
+        except ValueError:
+            log_validation_failure(
+                'kafka',
+                [{'loc': ('event_time',), 'type': 'value_error', 'msg': 'Invalid event time'}],
+            )
+            return 'invalid'
+        movie_event = {
+            'user_id': user_id,
+            'event_type': event,
+            'event_time': event_time,
+            'movie_id': parts[3].strip(),
+        }
+        if parts[4].strip():
+            movie_event['rating'] = parts[4].strip()
+        inserted, errors = store.record_movie_event(
+            movie_event, topic, partition, offset
+        )
+        return 'invalid' if inserted is None else event
     if re.fullmatch(r'GET /create_account/?(?:\s+HTTP/\S+)?', event):
         try:
-            event_time = _event_time(parts[0])
+            event_time = _event_time(timestamp)
         except ValueError:
             log_validation_failure(
                 'kafka',

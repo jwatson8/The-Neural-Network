@@ -14,9 +14,12 @@ from src.database.interactions import (
     cold_start_profiles,
     course_requests,
     data_quality_logs,
+    licensing_costs,
     llm_usage,
+    movies,
     recommendation_serves,
     stream_events,
+    user_movie_history,
     users,
 )
 from src.service.cold_start import recommend_cold_start
@@ -67,6 +70,41 @@ class LiveTests(unittest.TestCase):
         self.assertEqual(usage.status, "succeeded")
         handle_line(reopened, "topic", 0, 1, line)
         self.assertIsNone(reopened.claim_next())
+
+    def test_watch_and_rating_rows_are_persisted_and_derive_history(self):
+        movies.create(movie_id="live-movie", title="Live movie")
+        watch = handle_line(
+            self.store, "topic", 0, 10,
+            "2026-10-11T12:00:00Z,501,watch,live-movie,",
+        )
+        replay = handle_line(
+            self.store, "topic", 0, 10,
+            "2026-10-11T12:00:00Z,501,watch,live-movie,",
+        )
+        rating = handle_line(
+            self.store, "topic", 0, 11,
+            "2026-10-11T12:30:00Z,501,rating,live-movie,8",
+        )
+
+        self.assertEqual((watch, replay, rating), ("watch", "watch", "rating"))
+        events = stream_events.search(user_id="501", limit=10).records
+        self.assertEqual({event.event_type for event in events}, {"watch", "rating"})
+        history = user_movie_history.get("501", "live-movie")
+        self.assertEqual(history.latest_rating, 8)
+        self.assertIsNotNone(history.last_recorded_watch_at)
+        self.assertEqual(len(licensing_costs.search(user_id="501").records), 1)
+
+    def test_unknown_movie_stream_event_is_logged_and_not_persisted(self):
+        result = handle_line(
+            self.store, "topic", 0, 12,
+            "2026-10-11T12:00:00Z,501,watch,missing-movie,",
+        )
+
+        self.assertEqual(result, "invalid")
+        self.assertEqual(stream_events.list_records(), [])
+        logs = data_quality_logs.search(source="kafka", limit=10).records
+        self.assertEqual(len(logs), 1)
+        self.assertNotIn("missing-movie", str(logs[0].error_details))
 
     def test_invalid_account_event_is_logged_and_not_queued(self):
         result = handle_line(
