@@ -134,8 +134,18 @@ def process_one(store, client, model_name):
         )
         logger.info("profile_created user_id=%s attempts=%d", user_id, job["attempts"])
     except UserNotFoundError:
-        store.cancel_job(user_id)
-        logger.info("profile_cancelled user_id=%s reason=user_not_found", user_id)
+        try:
+            store.cancel_job(user_id)
+        except Exception as error:
+            store.retry_later(user_id, job["attempts"], type(error).__name__)
+            logger.warning(
+                "profile_cancel_retry user_id=%s attempts=%d error=%s",
+                user_id,
+                job["attempts"],
+                type(error).__name__,
+            )
+        else:
+            logger.info("profile_cancelled user_id=%s reason=user_not_found", user_id)
     except Exception as error:
         if llm_called and not llm_succeeded:
             try:
