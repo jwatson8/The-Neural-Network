@@ -13,7 +13,7 @@
 
 ### Online Evaluation (1 page of text max, excluding figures)
 
-See [Online evaluation](planning/Milestone%202/online_evaluation.md) for the metrics, telemetry, operationalization, and implementation links. [Production results are pending](planning/Milestone%202/online_evaluation_results.md); collect the documented live measurement window before final submission.
+See [Online evaluation](planning/Milestone%202/online_evaluation.md) for the metrics, telemetry, operationalization, and implementation links.
 
 ### Data Quality (0.5 page max)
 
