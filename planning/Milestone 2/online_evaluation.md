@@ -22,9 +22,9 @@ Those snapshots are used by Dashboards in Grafana. Dashboards visualize both the
 *Operationalization*: At time of logging, match the input and output token costs for the model selected with the provider's fee-per-token menu. Divide the input tokens by a million (usually, although may vary based on model - this assumes we are using gpt 4.0 mini) and mulitply the rate by the per-million token rate (in this case 15 cents). Follow the same pricing for the output tokens (60 cents). Calculate the 5-minute increment cost of those LLM calls. Then, add them to a rolling window composed of the previous 23 hours and 55 minutes. See [sample here](../../src/monitoring/calculations/llm_costs.py).
 
 ### Calculating Online Accuracy
-*Metric*: Raw accuracy of model over an acceptable threhsold (rating 6 or higher).
+*Metric*: Raw accuracy of model over an acceptable threhsold (rating 6 or higher) in a 5 minute and rolling 24 hour window.
 *Data*: Keep track of the [reccomendations your model serves](../../src/database/interactions/recommendation_serves.py) and the [watch and rating events of your users](../../src/database/interactions/stream_events.py).
-*Operationalization*: Over a 5 minute window, track the ratings of your users. Then, check to see if any of those users were serviced by any of your model routes (popularity_fallback, cold_start, or collaborative_filtering). 
+*Operationalization*: Over a 5 minute window, track the ratings of your users. Then, check to see if any of those users were serviced by any of your model routes (popularity_fallback, cold_start, or collaborative_filtering). For each, calculate the percent served over threshold / total attributable rating events from a reccomendation. Make sure not to count watch events not tied to reccomendation service. Sum the total numerators (composed of 5 min increments) and divide by the total denominators (composed of 5 min incremenets) e.g., (5+10+45) / (10 + 20 +50). This computes your rolling accuracy average. See [sample here](../../src/monitoring/calculations/live_model_accuracy.py).
 
 # Avodiing Pitfalls
 Data in production is always a challenge. We implemented a number of course concepts in our approach to online evaluation.
