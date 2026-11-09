@@ -50,6 +50,9 @@ class ProfileStore:
     def retry_later(self, user_id, attempts, error="profile generation failed"):
         return cold_start_jobs.retry(user_id=user_id, error=error)
 
+    def cancel_job(self, user_id):
+        return cold_start_jobs.complete(user_id)
+
     def record_account_created(self, user_id, event_time, topic, partition, offset):
         from uuid import NAMESPACE_URL, uuid5
 
