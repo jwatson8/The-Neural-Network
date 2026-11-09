@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 from openai import OpenAI
 from pydantic import BaseModel
 
+from src.database.interactions import llm_usage
 from src.service.store import ProfileStore
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -66,7 +67,7 @@ def generate_profile(client, model_name, likes, dislikes):
     profile = response.output_parsed
     if profile is None:
         raise ValueError("OpenAI returned no validated preference profile")
-    return profile
+    return profile, response.usage
 
 
 def process_one(store, client, model_name):
@@ -74,17 +75,46 @@ def process_one(store, client, model_name):
     if job is None:
         return False
     user_id = job["user_id"]
+    llm_called = False
+    llm_succeeded = False
     try:
         likes, dislikes = fetch_descriptions(user_id)
-        profile = (
-            generate_profile(client, model_name, likes, dislikes)
-            if likes.strip() or dislikes.strip()
-            else PreferenceProfile(positive="", negative="")
+        llm_request_id = None
+        if likes.strip() or dislikes.strip():
+            llm_called = True
+            profile, usage = generate_profile(client, model_name, likes, dislikes)
+            llm_succeeded = True
+            usage_record = llm_usage.create(
+                user_id=user_id,
+                provider="openai",
+                model_name=model_name,
+                status="succeeded",
+                input_tokens=usage.input_tokens if usage else 0,
+                output_tokens=usage.output_tokens if usage else 0,
+            )
+            llm_request_id = usage_record.request_id
+        else:
+            profile = PreferenceProfile(positive="", negative="")
+        store.save_profile(
+            user_id, profile.positive, profile.negative, llm_request_id=llm_request_id
         )
-        store.save_profile(user_id, profile.positive, profile.negative)
         logger.info("profile_created user_id=%s attempts=%d", user_id, job["attempts"])
     except Exception as error:
-        store.retry_later(user_id, job["attempts"])
+        if llm_called and not llm_succeeded:
+            try:
+                llm_usage.create(
+                    user_id=user_id,
+                    provider="openai",
+                    model_name=model_name,
+                    status="failed",
+                )
+            except Exception as audit_error:
+                logger.warning(
+                    "llm_usage_audit_failed user_id=%s error_type=%s",
+                    user_id,
+                    type(audit_error).__name__,
+                )
+        store.retry_later(user_id, job["attempts"], type(error).__name__)
         logger.warning(
             "profile_retry user_id=%s attempts=%d error=%s",
             user_id,
@@ -99,7 +129,7 @@ def main():
         raise ValueError(
             "Set USER_LOOKUP_URL_TEMPLATE and OPENAI_API_KEY before enabling live profiling"
         )
-    store = ProfileStore(os.getenv("PROFILE_DB_PATH", "state/profiles.sqlite3"))
+    store = ProfileStore()
     timeout = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "20"))
     client = OpenAI(timeout=timeout, max_retries=0)
     model_name = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")

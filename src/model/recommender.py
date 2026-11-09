@@ -10,6 +10,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
+from src.model.routing import uses_svd
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -103,7 +104,7 @@ def recommend(model, user_id, profiles, k=10):
     if k < 1:
         raise ValueError('k must be positive')
     seen = model['seen'].get(user_id, set())
-    if seen:
+    if uses_svd(model, user_id):
         scores = model['user_factors'][model['ui'][user_id]] @ model['movie_factors']
         method = 'collaborative_svd'
     elif user_id in profiles:

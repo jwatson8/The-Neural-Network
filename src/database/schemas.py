@@ -206,6 +206,14 @@ class RecommendationItem(DatabaseSchema):
         return value
 
 
+class CourseRequestCreate(DatabaseSchema):
+    topic: str = Field(min_length=1, max_length=255)
+    partition_id: int = Field(ge=0)
+    offset_id: int = Field(ge=0)
+    received_at: datetime | None = None
+    raw_line: str
+
+
 class RecommendationServeCreate(DatabaseSchema):
     request_id: UUID | None = None
     user_id: str = Field(min_length=1, max_length=255)

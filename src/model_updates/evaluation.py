@@ -9,6 +9,7 @@ import numpy as np
 from src.service.model_adapter import recommend
 from src.service.cold_start import recommend_cold_start
 from src.model_updates.snapshot import utc
+from src.model.routing import uses_svd
 
 
 class FrozenProfiles:
@@ -22,7 +23,7 @@ class FrozenProfiles:
 def rank(model, user, profiles, excluded=()):
     # Same score formulas as the serving paths; mask identical history BEFORE top-k.
     profile = profiles.get_profile(user)
-    if model['seen'].get(user):
+    if uses_svd(model, user):
         values = model['user_factors'][model['ui'][user]] @ model['movie_factors']
     elif profile and (profile['positive'].strip() or profile['negative'].strip()):
         query = model['vectorizer'].transform([profile['positive'], profile['negative']])
@@ -78,7 +79,7 @@ def compare(champion, candidate, history, heldout, profiles, min_users=100):
             metrics[name] = scores(ranking, relevant[user])
             if name == 'candidate':
                 elapsed.append((time.perf_counter() - before) * 1000)
-        rows.append(dict(user_id=user, cohort='warm' if champion['seen'].get(user) else 'cold', **metrics))
+        rows.append(dict(user_id=user, cohort='warm' if uses_svd(champion, user) else 'cold', **metrics))
     delta = np.array([r['candidate']['ndcg_at_20'] - r['champion']['ndcg_at_20'] for r in rows])
     lower = None
     if len(rows) >= min_users:

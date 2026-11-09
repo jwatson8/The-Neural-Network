@@ -75,13 +75,22 @@ latest rating, and whether the most recent accepted rating changed its predecess
 Older and equal-time events remain in `stream_events` but do not regress the
 materialized history row.
 
+The course Kafka consumer routes account-created events through the service store
+to `src.data_quality.ingestion.persist_stream_event`, which delegates validation
+to `stream_events.create_many`. Event IDs are stable for a Kafka topic/partition/
+offset, so replayed records are deduplicated. Invalid records produce sanitized
+validation logs. Database errors are not converted to validation failures; they
+propagate before the consumer commits its polled batch, leaving it available for
+Kafka redelivery after restart. Recommendation-request lines are stored separately
+in `course_requests`, not as interaction events.
+
 New watch events also derive immutable licensing charges in the same transaction.
 The first watch for a user/movie pair is charged. Later watches are charged only
 when their event time is at least 24 hours after the preceding accepted watch.
 
 ## Search Functionality
 
-The append-only tables are `stream_events`, `licensing_costs`,
+The append-only tables are `stream_events`, `course_requests`, `licensing_costs`,
 `recommendation_serves`, `llm_usage`, `data_quality_logs`, `model_logs`, and
 `monitoring_runs`.
 
@@ -151,8 +160,11 @@ safe to rerun. Its JSON report includes created counts and skipped IDs. Live
 services and Kafka consumers must use the interaction API instead.
 
 ```sh
-docker compose --profile tools run --rm database-roll-up
+docker compose run --rm database-roll-up
 ```
+
+Normal Compose startup runs this idempotent roll-up before starting the API. Running
+the command manually is useful for backfills or verifying a standalone database.
 
 ## Running in Production
 
@@ -175,8 +187,9 @@ python -m unittest discover -s src/database/tests -v
 bootstrap. Use a migration tool such as Alembic before making production schema
 changes.
 
-## Left to Add
+## Service Integration
 
-Flask currently uses SQLite for the cold-start workflow. The PostgreSQL
-`cold_start_jobs` and `cold_start_profiles` interactions are implemented but have not
-yet been integrated into the Flask service.
+The Flask API, profile worker, and Kafka consumer use the PostgreSQL interaction
+functions for profiles, jobs, recommendation serves, LLM usage, stream events, and
+raw course-request evidence. Kafka request rows are deduplicated by topic, partition,
+and offset so a replay after a failed commit does not duplicate evidence.

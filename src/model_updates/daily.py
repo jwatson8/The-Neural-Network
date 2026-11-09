@@ -19,6 +19,7 @@ from src.model_updates.snapshot import capture, normalize_events, utc, window
 from src.model_updates.evaluation import compare, production_report
 from src.service.model_adapter import validate_model, recommend
 from src.data_quality.drift import detect_event_type_drift, detect_rating_drift
+from src.data_quality.quality_logging import log_drift_result
 from src.model_updates.policy import rejection_reasons, POLICY
 from src.model_updates.audit import monitoring_context
 
@@ -138,6 +139,8 @@ def run(day, artifacts, data_dir=DEFAULT_DATA, snapshot=None, min_users=100):
                 'events': detect_event_type_drift(baseline, heldout),
                 'ratings': detect_rating_drift([e for e in baseline if e['event_type'] == 'rating'],
                                               [e for e in heldout if e['event_type'] == 'rating'])}
+            for drift_result in report['drift'].values():
+                log_drift_result(drift_result)
             catalog = {m['movie_id'] for m in champion['movies']}
             eval_events = [e for e in history if not e['movie_id'] or e['movie_id'] in catalog]
             # Frozen champion catalog avoids introducing future metadata into the evaluation.

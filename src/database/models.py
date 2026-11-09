@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     JSON,
     CheckConstraint,
     Column,
@@ -149,7 +150,7 @@ class Movie(SQLModel, table=True):
     imdb_id: str | None = Field(default=None, max_length=50, index=True)
     tmdb_id: str | None = Field(default=None, max_length=50, index=True)
     license_cost: Decimal | None = Field(
-        default=None, max_digits=14, decimal_places=8, ge=0
+        default=None, max_digits=16, decimal_places=10, ge=0
     )
 
 
@@ -193,6 +194,20 @@ class StreamEvent(SQLModel, table=True):
     )
     minute_index: int | None = Field(default=None, ge=0)
     rating: float | None = Field(default=None, ge=1, le=10)
+
+
+class CourseRequest(SQLModel, table=True):
+    __tablename__ = "course_requests"
+    __table_args__ = (
+        CheckConstraint("partition_id >= 0", name="ck_course_request_partition"),
+        CheckConstraint("offset_id >= 0", name="ck_course_request_offset"),
+    )
+
+    topic: str = Field(primary_key=True, max_length=255)
+    partition_id: int = Field(primary_key=True, ge=0)
+    offset_id: int = Field(primary_key=True, ge=0, sa_type=BigInteger)
+    received_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False, index=True)
+    raw_line: str = Field(sa_type=Text, nullable=False)
 
 
 class UserMovieHistory(SQLModel, table=True):
@@ -254,7 +269,7 @@ class LicensingCost(SQLModel, table=True):
     user_id: str = Field(foreign_key="users.user_id", max_length=255, index=True)
     movie_id: str = Field(foreign_key="movies.movie_id", max_length=255, index=True)
     license_cost: Decimal | None = Field(
-        default=None, max_digits=14, decimal_places=8, ge=0
+        default=None, max_digits=16, decimal_places=10, ge=0
     )
 
 
@@ -327,7 +342,7 @@ class MonitoringRun(SQLModel, table=True):
     window_end: datetime = Field(sa_type=DateTime(timezone=True), nullable=False)
     licensing_charge_count: int = Field(ge=0)
     licensing_priced_charge_count: int = Field(ge=0)
-    total_license_cost: Decimal = Field(max_digits=14, decimal_places=8, ge=0)
+    total_license_cost: Decimal = Field(max_digits=16, decimal_places=10, ge=0)
     llm_request_count: int = Field(ge=0)
     llm_priced_request_count: int = Field(ge=0)
     llm_input_tokens: int = Field(ge=0)

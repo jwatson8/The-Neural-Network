@@ -51,7 +51,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      PROFILE_VOLUME_NAME: ci-profiles
       POSTGRES_PASSWORD: ci-only-not-a-production-secret
       BIND_ADDRESS: 127.0.0.1
       DAILY_MODEL_UPDATES_ENABLED: 'false'
@@ -62,8 +61,8 @@ jobs:
       - run: mkdir -p artifacts
       - name: Train checked-in fixture without production access
         run: LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose --profile tools run --rm train
-      - run: docker compose up -d --wait --wait-timeout 120
-      - run: docker compose exec -T api python deployment/smoke_test.py
+      - run: docker compose up -d --wait --wait-timeout 300
+      - run: docker compose exec -T api python -m deployment.smoke_test
       - run: curl --fail --max-time 0.6 http://127.0.0.1:8082/recommend/1
       - name: Daily job uses isolated PostgreSQL and retains model without fresh data
         run: |

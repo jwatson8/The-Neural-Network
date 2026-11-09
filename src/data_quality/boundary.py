@@ -30,8 +30,12 @@ def validate_recommendation_request(
         return None, _response_error((), "Request must be an object of route values")
     errors = []
     user_id = raw_request.get("user_id")
-    if not isinstance(user_id, str) or not user_id.strip() or "/" in user_id:
-        errors.extend(_response_error(("user_id",), "user_id must be a nonblank string path segment"))
+    if not isinstance(user_id, str) or not user_id.strip():
+        errors.extend(_response_error(("user_id",), "user_id must not be blank"))
+    elif "/" in user_id:
+        errors.extend(_response_error(("user_id",), "user_id must be a single path segment"))
+    elif len(user_id) > 255:
+        errors.extend(_response_error(("user_id",), "user_id must be at most 255 characters"))
     for key in raw_request.keys() - {"user_id"}:
         errors.extend(_response_error((key,), "Unsupported request parameter"))
     if query_params is not None:

@@ -6,8 +6,9 @@ import hashlib
 import json
 import os
 import re
-import sqlite3
 from zoneinfo import ZoneInfo
+
+from src.database.interactions import course_requests, recommendation_serves
 
 PATTERN = re.compile(r'^([^,]+),([^,]+),recommendation request (.*?),\s*status\s+(\d+),\s*result:\s*(.*),\s*([^,]+)\s*$')
 
@@ -19,12 +20,41 @@ def timestamp(value, zone):
     return parsed.timestamp()
 
 
-def summarize(connection, server, start, end, zone):
+def _epoch(value):
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
+
+
+def iter_course_lines(page_size=1000):
+    """Yield raw course lines a page at a time instead of loading all history."""
+    if not 1 <= page_size <= 1000:
+        raise ValueError('page_size must be between 1 and 1000')
+    offset = 0
+    while True:
+        page = course_requests.list_records(offset=offset, limit=page_size)
+        yield from (record.raw_line for record in page)
+        if len(page) < page_size:
+            return
+        offset += len(page)
+
+
+def summarize(lines, audits, server, start, end, zone):
     counts = Counter()
     used_audits = set()
     signatures = set()
-    rows = connection.execute('SELECT raw_line FROM course_requests ORDER BY received_at, partition_id, offset_id')
-    for (line,) in rows:
+    audit_index = {}
+    for audit in audits:
+        canonical = ','.join(
+            str(item['movie_id'] if isinstance(item, dict) else item.movie_id)
+            for item in audit.recommendations
+        )
+        digest = hashlib.sha256(canonical.encode()).hexdigest()
+        audit_index.setdefault((audit.user_id, digest), []).append(audit)
+    for candidates in audit_index.values():
+        candidates.sort(key=lambda audit: _epoch(audit.served_at))
+
+    for line in lines:
         prefix = line.strip().split(',', 2)
         if len(prefix) != 3:
             counts['unparsed_records'] += 1
@@ -52,17 +82,15 @@ def summarize(connection, server, start, end, zone):
         canonical = ','.join(item.strip() for item in body.split(','))
         signatures.add(canonical)
         digest = hashlib.sha256(canonical.encode()).hexdigest()
-        audit = connection.execute('''
-            SELECT id, route FROM response_audit
-            WHERE user_id=? AND result_hash=? AND served_at BETWEEN ? AND ?
-            ORDER BY ABS(served_at-?)
-        ''', (user_id.strip(), digest, when - 120, when + 120, when)).fetchall()
-        for audit_id, route in audit:
-            if audit_id in used_audits:
+        candidates = audit_index.get((user_id.strip(), digest), [])
+        for audit in sorted(candidates, key=lambda item: abs(_epoch(item.served_at) - when)):
+            if audit.request_id in used_audits:
                 continue
-            used_audits.add(audit_id)
+            if abs(_epoch(audit.served_at) - when) > 120:
+                continue
+            used_audits.add(audit.request_id)
             counts['matched_api_responses'] += 1
-            if route in ('collaborative_svd', 'llm_content'):
+            if audit.model_route in ('collaborative_svd', 'llm_content'):
                 counts['matched_personalized_successes'] += 1
             break
     total = counts['all_requests']
@@ -83,10 +111,9 @@ def main():
     parser.add_argument('--end', help='Window end; defaults to 24 hours after --start')
     parser.add_argument('--list-servers', action='store_true')
     args = parser.parse_args()
-    connection = sqlite3.connect(os.environ['PROFILE_DB_PATH'], timeout=5)
     if args.list_servers:
         counts = Counter()
-        for (line,) in connection.execute('SELECT raw_line FROM course_requests'):
+        for line in iter_course_lines():
             parts = line.strip().split(',', 2)
             if len(parts) == 3:
                 counts[parts[2].split(',', 1)[0].removeprefix('recommendation request ').strip()] += 1
@@ -111,7 +138,22 @@ def main():
     if end <= start or end - start > 86400:
         parser.error('Choose a positive window of at most 24 hours')
     zone = os.getenv('COURSE_LOG_TIMEZONE', 'UTC')
-    result = summarize(connection, args.server, start, end, zone)
+    audit_start = datetime.fromtimestamp(start - 120, timezone.utc)
+    audit_end = datetime.fromtimestamp(end + 120, timezone.utc)
+    audits = []
+    cursor = None
+    while True:
+        page = recommendation_serves.search(
+            start=audit_start,
+            end=audit_end,
+            cursor=cursor,
+            limit=1000,
+        )
+        audits.extend(page.records)
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    result = summarize(iter_course_lines(), audits, args.server, start, end, zone)
     result.update(server=args.server, naive_log_timezone=zone,
                   window_start_utc=datetime.fromtimestamp(start, timezone.utc).isoformat(),
                   window_end_utc=datetime.fromtimestamp(end, timezone.utc).isoformat(),

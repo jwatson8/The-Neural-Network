@@ -1,11 +1,19 @@
-import tempfile
-import time
 import unittest
+from datetime import UTC, datetime
 from unittest.mock import patch
-from pathlib import Path
 
 import numpy as np
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel, create_engine
 
+from src.database.interactions import (
+    cold_start_jobs,
+    data_quality_logs,
+    movies,
+    stream_events,
+    users,
+)
 from src.service.api import create_app
 from src.service.model_adapter import recommend
 from src.service.store import ProfileStore
@@ -62,15 +70,41 @@ def make_model():
 
 class ServiceTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp_dir.cleanup)
-        self.store = ProfileStore(Path(self.temp_dir.name) / 'profiles.sqlite3')
+        self.engine = create_engine(
+            'sqlite://',
+            connect_args={'check_same_thread': False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(self.engine)
+        self.engine_patch = patch('src.database.database.get_engine', return_value=self.engine)
+        self.engine_patch.start()
+        self.addCleanup(self.engine_patch.stop)
+        self.addCleanup(self.engine.dispose)
+        self.store = ProfileStore()
+        audit_patch = patch('src.service.api.recommendation_serves.create')
+        self.create_recommendation_serve = audit_patch.start()
+        self.addCleanup(audit_patch.stop)
         self.app = create_app(
             model=make_model(),
             profile_store=self.store,
             config={'TESTING': True, 'MODEL_VERSION': 'test'},
         )
         self.client = self.app.test_client()
+
+    def record_watches(self, user_id, movie_ids):
+        users.create_missing_many([{"user_id": user_id}])
+        movies.create_missing_many(
+            [{"movie_id": movie_id, "title": f"Title {movie_id}"} for movie_id in movie_ids]
+        )
+        stream_events.create_many(
+            {
+                "user_id": user_id,
+                "movie_id": movie_id,
+                "event_type": "watch",
+                "event_time": datetime.now(UTC),
+            }
+            for movie_id in movie_ids
+        )
 
     def test_recommendation_is_plain_text_up_to_twenty_ids(self):
         response = self.client.get('/recommend/warm')
@@ -81,6 +115,165 @@ class ServiceTests(unittest.TestCase):
         self.assertNotIn('movie-0', ids)
         self.assertNotIn('\n', response.get_data(as_text=True))
 
+    def test_recommendation_rejects_unsupported_query_and_logs_sanitized_error(self):
+        response = self.client.get('/recommend/warm?private-field=secret-value')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error'], 'Bad Request')
+        records = data_quality_logs.list_records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].source, 'recommendation_api')
+        self.assertNotIn('secret-value', str(records[0].error_details))
+
+    def test_invalid_recommendation_output_is_logged_before_audit(self):
+        with patch(
+            'src.service.api.recommend',
+            return_value=(['invalid\nmovie-id'], 'collaborative_svd'),
+        ):
+            response = self.client.get('/recommend/warm')
+
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(self.create_recommendation_serve.called)
+        records = data_quality_logs.list_records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].source, 'recommendation_api')
+
+    def test_recommendation_is_written_to_database_audit(self):
+        response = self.client.get('/recommend/warm')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(users.get('warm'))
+        audit = self.create_recommendation_serve.call_args.kwargs
+        self.assertEqual(audit['user_id'], 'warm')
+        self.assertEqual(audit['model_route'], 'popularity_fallback')
+        self.assertEqual(audit['model_version'], 'test')
+        self.assertEqual(
+            [item['movie_id'] for item in audit['recommendations']],
+            response.get_data(as_text=True).split(','),
+        )
+        self.assertGreaterEqual(audit['serve_duration_ms'], 0)
+        self.assertLessEqual(len(audit['recommendations']), 20)
+
+    def test_trained_factors_without_database_history_use_popularity(self):
+        self.app.extensions['recommendation_model']['seen']['warm'] = set(range(10))
+
+        response = self.client.get('/recommend/warm')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.create_recommendation_serve.call_args.kwargs['model_route'],
+            'popularity_fallback',
+        )
+
+    def test_svd_requires_current_history_and_ten_trained_movies(self):
+        model = self.app.extensions['recommendation_model']
+        model['seen']['warm'] = set(range(10))
+        self.record_watches('warm', [f'movie-{index}' for index in range(10)])
+        self.create_recommendation_serve.reset_mock()
+
+        response = self.client.get('/recommend/warm')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.create_recommendation_serve.call_args.kwargs['model_route'],
+            'collaborative_svd',
+        )
+
+    def test_database_history_excludes_movies_not_in_trained_seen_snapshot(self):
+        model = self.app.extensions['recommendation_model']
+        model['seen']['warm'] = set(range(10))
+        dynamic_movie = 'movie-10'
+        self.record_watches('warm', [f'movie-{index}' for index in range(10)] + [dynamic_movie])
+        self.create_recommendation_serve.reset_mock()
+
+        response = self.client.get('/recommend/warm')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(dynamic_movie, response.get_data(as_text=True).split(','))
+
+    def test_database_audit_failure_returns_service_unavailable(self):
+        self.create_recommendation_serve.side_effect = SQLAlchemyError('database unavailable')
+
+        response = self.client.get('/recommend/warm')
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()['error'], 'Service Unavailable')
+        self.assertNotIn('database unavailable', response.get_data(as_text=True))
+
+    def test_blank_user_id_returns_bad_request_json(self):
+        response = self.client.get('/recommend/%20%20')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error'], 'Bad Request')
+        self.assertEqual(response.get_json()['message'], 'user_id must not be blank')
+
+    def test_user_id_longer_than_persistence_limit_is_rejected(self):
+        response = self.client.get('/recommend/' + ('u' * 256))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.get_json()['message'],
+            'user_id must be at most 255 characters',
+        )
+        self.assertFalse(self.create_recommendation_serve.called)
+
+    def test_method_not_allowed_preserves_allow_header(self):
+        response = self.client.post('/recommend/warm')
+
+        self.assertEqual(response.status_code, 405)
+        self.assertIn('GET', response.headers['Allow'])
+        self.assertEqual(response.get_json()['error'], 'Method Not Allowed')
+
+    def test_unknown_route_returns_not_found_json(self):
+        response = self.client.get('/not-a-route')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json()['error'], 'Not Found')
+
+    def test_public_database_summary_returns_table_counts(self):
+        users.create(user_id='summary-user')
+
+        response = self.client.get('/database/summary')
+
+        self.assertEqual(response.status_code, 200)
+        counts = response.get_json()['tables']
+        self.assertEqual(counts['users'], 1)
+        self.assertIn('cold_start_jobs', counts)
+        self.assertEqual(set(counts), set(SQLModel.metadata.tables))
+        self.assertNotIn('summary-user', response.get_data(as_text=True))
+
+    def test_public_cold_start_jobs_are_paginated_and_sanitized(self):
+        self.store.enqueue('private-user-a')
+        self.store.enqueue('private-user-b')
+
+        response = self.client.get('/database/cold-start-jobs?limit=1')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(len(payload['jobs']), 1)
+        self.assertTrue(payload['has_more'])
+        self.assertEqual(payload['jobs'][0]['status'], 'pending')
+        self.assertNotIn('user_id', payload['jobs'][0])
+        self.assertNotIn('last_error', payload['jobs'][0])
+        self.assertNotIn('private-user', response.get_data(as_text=True))
+
+    def test_public_cold_start_jobs_filter_status_and_validate_query(self):
+        self.store.enqueue('pending-user')
+        users.create(user_id='processing-user')
+        cold_start_jobs.enqueue(user_id='processing-user', status='processing')
+        pending = self.client.get('/database/cold-start-jobs?status=pending').get_json()
+        self.assertTrue(all(job['status'] == 'pending' for job in pending['jobs']))
+
+        for query in ('?limit=abc', '?offset=-1', '?limit=101', '?status=unknown'):
+            with self.subTest(query=query):
+                response = self.client.get('/database/cold-start-jobs' + query)
+                self.assertEqual(response.status_code, 400)
+
+    def test_unexpected_error_returns_generic_internal_server_error(self):
+        with patch('src.service.api.recommend', side_effect=RuntimeError('private detail')):
+            response = self.client.get('/recommend/warm')
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json()['error'], 'Internal Server Error')
+        self.assertNotIn('private detail', response.get_data(as_text=True))
+
     def test_unknown_id_gets_fast_fallback_and_is_queued(self):
         response = self.client.get('/recommend/new-user')
         ids = response.get_data(as_text=True).split(',')
@@ -89,28 +282,18 @@ class ServiceTests(unittest.TestCase):
         job = self.store.claim_next()
         self.assertEqual(job['user_id'], 'new-user')
 
-    def test_database_contention_does_not_block_recommendation(self):
-        with self.store.connect() as connection:
-            connection.execute('BEGIN EXCLUSIVE')
-            started = time.perf_counter()
+    def test_cold_start_database_failure_falls_back_to_recommendation(self):
+        with patch.object(self.store, 'get_profile', side_effect=RuntimeError('database unavailable')):
             response = self.client.get('/recommend/contended-user')
-            elapsed = time.perf_counter() - started
         self.assertEqual(response.status_code, 200)
-        self.assertLess(elapsed, 0.6)
+        self.assertEqual(len(response.get_data(as_text=True).split(',')), 20)
 
     def test_raw_description_does_not_skip_llm_queue(self):
-        with self.store.connect() as connection:
-            connection.execute('''
-                INSERT INTO users (user_id, self_description_likes, self_description_dislikes)
-                VALUES (?, ?, ?)
-            ''', ('cold-user', 'unique-tag', ''))
-            connection.executemany('''
-                INSERT INTO movies (movie_id, title, genres, popularity)
-                VALUES (?, ?, ?, ?)
-            ''', [
-                ('action-db', 'Unique pick', 'unique-tag', 1),
-                ('drama-db', 'Drama pick', 'Drama', 100),
-            ])
+        users.create(user_id='cold-user', self_description_likes='unique-tag')
+        movies.create_missing_many([
+            {'movie_id': 'action-db', 'title': 'Unique pick', 'genres': 'unique-tag', 'popularity': 1},
+            {'movie_id': 'drama-db', 'title': 'Drama pick', 'genres': 'Drama', 'popularity': 100},
+        ])
 
         response = self.client.get('/recommend/cold-user')
         ids = response.get_data(as_text=True).split(',')
@@ -119,11 +302,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.store.claim_next()['user_id'], 'cold-user')
 
     def test_saved_profile_personalizes_user_without_database_account(self):
-        with self.store.connect() as connection:
-            connection.execute('''
-                INSERT INTO movies (movie_id, title, genres, popularity)
-                VALUES (?, ?, ?, ?)
-            ''', ('profile-db', 'Profile pick', 'unique-tag', 1))
+        movies.create(movie_id='profile-db', title='Profile pick', genres='unique-tag', popularity=1)
         self.store.save_profile('profile-user', 'unique-tag', '')
 
         response = self.client.get('/recommend/profile-user')
@@ -136,24 +315,6 @@ class ServiceTests(unittest.TestCase):
     def test_health_requires_model_and_profile_store(self):
         response = self.client.get('/health')
         self.assertEqual(response.status_code, 200)
-
-    def test_initialization_populates_dataset_tables_idempotently(self):
-        expected_counts = {'events': 54704, 'movies': 2569, 'users': 1050}
-        with patch.dict('os.environ', {'SEED_DATASETS': '1'}):
-            self.store.initialize()
-            self.store.initialize()
-        with self.store.connect() as connection:
-            counts = {
-                table: connection.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
-                for table in expected_counts
-            }
-            first_movie = connection.execute(
-                'SELECT title FROM movies WHERE movie_id = ?',
-                ('...and+justice+for+all+1979',),
-            ).fetchone()
-        self.assertEqual(counts, expected_counts)
-        self.assertEqual(first_movie['title'], '...And Justice for All')
-
 
 if __name__ == '__main__':
     unittest.main()

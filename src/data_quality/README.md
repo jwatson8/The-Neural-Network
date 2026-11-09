@@ -19,6 +19,22 @@ responses or JSON text. Neither function performs I/O or modifies the input.
   recorded CSV snapshot into those names; it is not a live API adapter.
 - No Movie API response definition or response fixture was found.
 
+## Runtime integration status
+
+- The Flask recommendation route validates its path/query inputs and generated
+  text response. Validation failures produce sanitized logs; invalid requests
+  return 400 and invalid generated responses return 500.
+- Kafka account-created events are persisted as `account_created` stream events
+  through `persist_stream_event`. Schema failures are logged without raw input;
+  database errors propagate before the consumer commits its polled batch, so
+  Kafka can redeliver it after the consumer restarts. This is not an in-process
+  retry loop or a configured backoff policy.
+- The daily model-update job logs its computed event-type and rating drift
+  results, as well as including them in its report.
+- `validate_user_response()` is not wired into the live profile worker because
+  the User API identity/field contract is undocumented. There is no live Movie
+  API call site for `validate_movie_response()`.
+
 The implemented subset therefore accepts database field names only, plus the
 verified User wrapper. It does not guess `id` aliases, integer ID conversions,
 genre list encodings, Movie wrappers, or configured preference aliases. Callers
@@ -88,12 +104,15 @@ Remaining mismatches are intentional: worker responses can omit identity and
 contain extra fields; persistence requires identity and rejects extra fields.
 Worker aliases and preference-presence checks require an integration adapter.
 The live ID field/representation, possible metadata and alias collisions still
-need contract confirmation. No service integration is performed here.
+need contract confirmation. This limitation applies to profile-worker mapping;
+the recommendation, Kafka account-event and daily drift paths are integrated as
+described above.
 
-Integration owners still need to confirm live field names, required response
-fields, identifier types, null/empty conventions, numeric ranges, and envelopes;
-then connect these validators to fetching/persistence and error handling. These
-functions do not replace the existing preference-only worker lookup.
+The live User API contract still needs confirmation for field names, required
+fields, identifier representation, null/empty conventions, numeric ranges and
+envelopes. These response validators do not replace the existing
+preference-only worker lookup. `validate_movie_response()` remains a standalone
+validator until a real Movie API call site and response contract exist.
 
 Run from the repository root with the service dependencies installed:
 
@@ -130,9 +149,8 @@ existence requirement, or unverified public ID length limit is imposed.
 
 Only `user_id` is a supported route value. Supplying any additional request key
 or query parameter (including `k`, `limit`, numeric NaN or Infinity) is rejected.
-This is an explicit boundary policy: the current Flask route ignores query
-parameters. The API owner must decide how to surface those errors when wiring it
-in; this implementation does not change current Flask behavior.
+The Flask route passes `request.args` to this validator, logs sanitized validation
+failures, and returns a generic 400 before inference.
 
 `validate_recommendation_response(body)` accepts the **decoded text body of a
 successful public response**, such as `"movie-z,movie-a"`. It returns an ordered
@@ -178,7 +196,7 @@ Within the Flask route, before inference:
 request_value, errors = validate_recommendation_request(
     {"user_id": user_id}, query_params=request.args
 )
-# API owner handles errors before using request_value["user_id"].
+# Flask logs errors and returns a generic 400 before using request_value.
 ```
 
 Before emitting a successful body:
@@ -186,7 +204,7 @@ Before emitting a successful body:
 ```python
 body = ",".join(movie_ids)
 items, errors = validate_recommendation_response(body)
-# API owner handles errors, then emits body as text/plain in the original order.
+# Flask logs invalid output and returns a generic 500 before auditing or emitting it.
 ```
 
 The caller must ensure the inference result contains string IDs before joining;
@@ -206,7 +224,7 @@ for that case. The reused 255-character movie ID persistence limit is stricter
 than the route's bare string joining; live catalogs must respect that limit.
 Any future public score field, query parameter or JSON envelope requires an
 explicit API contract change. HTTP error handling and telemetry construction
-remain with the service owner; no service files are changed here.
+are implemented by the Flask service after output validation succeeds.
 
 ## Data drift detection
 
@@ -332,8 +350,10 @@ events or changes in user mix can change proportions. Missingness changes may
 reflect event mix rather than ingestion failures. Results are invariant to row
 order for valid snapshots; invalid row error locations follow the supplied
 order. The core materializes snapshots and is intended for bounded M2 windows,
-not unbounded streams. Baseline selection, persistence of reports, alerting and
-threshold calibration remain integration responsibilities.
+not unbounded streams. The daily model-update job provides one orchestration path
+for event-type and rating drift, logging results and retaining them in its report.
+Other window policies, missingness monitoring, alerting and threshold calibration
+remain caller responsibilities.
 
 ## Data Quality logging
 
@@ -419,11 +439,11 @@ if errors:
 log_drift_result(ratings_result)
 ```
 
-Flask owners use the same pattern with `user_api`, `movie_api`, or
-`recommendation_api` after their validator calls, and separately implement HTTP
-error handling. Log once per validation decision; avoid recounting retries as
-distinct records unless that is the intended reporting policy. Use the drift
-logger once per metric/window result, including every missingness result.
+The Flask recommendation route currently uses the `recommendation_api` validators
+and logs failures with HTTP 400/500 handling. User and Movie response validators
+have no live service call sites. Log once per validation decision; avoid recounting
+retries as distinct records unless that is the intended reporting policy. Use the
+drift logger once per metric/window result, including every missingness result.
 
 Handlers, output destinations, timestamps and retention are application-owned.
 If the log collector requires every output line to be JSON, the owner must use
@@ -666,14 +686,15 @@ verified with `git check-ignore`; no generated coverage output is intended for
 Git. Keep future coverage commands pointed at these paths (or another explicitly
 ignored artifact directory).
 
-## PR review update: database-owned validation and PostgreSQL log storage
+## Earlier PR review: database-owned validation and PostgreSQL log storage
 
-The current `src/service/course_stream.py` consumes course **text** messages for
-account/profile jobs and recommendation evidence in `ProfileStore`. It does not
-yet write decoded stream events through Nathan's PostgreSQL interaction API.
-No duplicate-validator call chain actually exists in that service today. Its text
-parser, SQLite behavior, offset commits and retry policy remain unchanged; no
-unverified watch/rating text format or automatic PostgreSQL migration is added.
+This section records an earlier integration checkpoint; its initial wiring status
+has been superseded. The current `src/service/course_stream.py` persists parsed
+account-created events to PostgreSQL through `ProfileStore.record_account_created`
+and `persist_stream_event`, and stores recommendation-request evidence separately
+in `course_requests`. Watch/rating events are not currently ingested from the
+course log. A database error propagates before the polled batch is committed;
+invalid input is sanitized and logged, then treated as an invalid record.
 
 ### One validation at the ingestion handoff
 
@@ -693,7 +714,7 @@ from src.data_quality.ingestion import persist_stream_event
 
 inserted, errors = persist_stream_event(decoded_event)
 if errors:
-    # Already logged safely. Consumer owner chooses rejection evidence/commit policy.
+    # Already logged safely; the consumer treats this as an invalid record.
     pass
 # inserted == 1: stored; inserted == 0: existing deterministic event UUID.
 # inserted is None: input rejected. Processing a later event is still safe.
@@ -709,8 +730,9 @@ ID follows the database's existing random UUID behavior. Parent user/movie rows
 must exist for accepted events. No parser, identity or parent rows are invented.
 The hook is covered with real repository writes on in-memory SQLite and a spy
 asserting one `StreamEventCreate.model_validate()` call. Wiring this hook after
-the consumer owner's verified decoding step is still required; it is not wired
-into the existing unrelated text/ProfileStore path.
+the course consumer's account-created event parsing is now implemented in
+`ProfileStore.record_account_created`. Its event UUID is deterministic from the
+Kafka topic, partition and offset, providing replay deduplication.
 
 ### Storage architecture
 

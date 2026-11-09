@@ -101,6 +101,9 @@ class EvaluationTests(unittest.TestCase):
 
 class PipelineTests(unittest.TestCase):
     def setUp(self):
+        self.drift_logger_patch = patch("src.model_updates.daily.log_drift_result")
+        self.drift_logger = self.drift_logger_patch.start()
+        self.addCleanup(self.drift_logger_patch.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -145,10 +148,11 @@ class PipelineTests(unittest.TestCase):
         comparison = dict(groups={'all': {'users': 100}}, paired_delta_lower_95=.1, candidate_p95_ms=1)
         with patch('src.model_updates.daily.compare', return_value=comparison), \
              patch('src.model_updates.daily.detect_event_type_drift', return_value={'status': 'no_drift'}), \
-             patch('src.model_updates.daily.detect_rating_drift', return_value={'status': 'no_drift'}), \
+               patch('src.model_updates.daily.detect_rating_drift', return_value={'status': 'no_drift'}), \
              patch('src.model_updates.daily.fit', wraps=fit) as training:
             report = run(self.day, self.root, self.data, self.snapshot)
         self.assertEqual(report['status'], 'awaiting_approval')
+        self.assertEqual(self.drift_logger.call_count, 2)
         self.assertEqual(len(training.call_args_list[0].args[0]), 2)
         self.assertEqual(len(training.call_args_list[1].args[0]), 3)
         self.assertEqual(joblib.load(self.root/'model.joblib')['update_metadata']['version'], 'baseline')
@@ -168,7 +172,7 @@ class PipelineTests(unittest.TestCase):
         from src.service.api import create_app
         from src.service.store import ProfileStore
         app = create_app(model=joblib.load(self.root/'model.joblib'),
-                         profile_store=ProfileStore(self.root/'profiles.sqlite3'))
+                         profile_store=ProfileStore())
         self.assertEqual(app.test_client().get('/health').json['model_version'], 'baseline')
 
     def test_late_arriving_history_is_not_used_to_train_evaluation_candidate(self):

@@ -5,6 +5,8 @@ Shared location for the team's Milestone 2 report sections. Add each write-up as
 ## Available sections
 
 - [Automated model updates](automated_model_updates.md)
+- [Online evaluation](online_evaluation.md)
+- [Online evaluation results and collection instructions](online_evaluation_results.md) — production measurements pending.
 
 Add links here as other sections are contributed. Keep each section within its assignment page limit. Before submission, assemble the sections into the required `m2_report.md` or `m2_report.pdf` at the repository root, preserving existing teammates' work there.
 
