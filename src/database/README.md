@@ -7,9 +7,9 @@ and Psycopg.
 
 ## Organization
 
-The database is organized by table and table-specific interactions. There are 13 tables:
+The database is organized by table and table-specific interactions. There are 14 tables:
 
-`stream_events`, `user_movie_history`, `recommendation_serves`, `users`,
+`stream_events`, `course_requests`, `user_movie_history`, `recommendation_serves`, `users`,
 `llm_usage`, `movies`, `cold_start_jobs`, `cold_start_profiles`,
 `data_quality_logs`, `model_logs`, `licensing_costs`, `monitoring_runs`, and
 `monitoring_model_accuracy`.
