@@ -339,6 +339,20 @@ class MonitoringRun(SQLModel, table=True):
     recommendation_accuracy: float | None = Field(default=None, ge=0, le=1)
 
 
+class MonitoringModelAccuracy(SQLModel, table=True):
+    __tablename__ = "monitoring_model_accuracy"
+
+    run_id: UUID = Field(
+        foreign_key="monitoring_runs.run_id",
+        primary_key=True,
+    )
+    model_route: str = Field(primary_key=True, max_length=100)
+    model_version: str = Field(primary_key=True, max_length=255)
+    attributed_rating_count: int = Field(ge=0)
+    positive_rating_count: int = Field(ge=0)
+    recommendation_accuracy: float | None = Field(default=None, ge=0, le=1)
+
+
 class ColdStartProfile(SQLModel, table=True):
     __tablename__ = "cold_start_profiles"
 

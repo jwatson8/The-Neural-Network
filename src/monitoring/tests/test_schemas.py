@@ -9,6 +9,7 @@ from src.monitoring.schemas import (
     EvaluationWindow,
     LicensingSummary,
     LLMSummary,
+    ModelAccuracySummary,
     MonitoringConfig,
     MonitorResult,
     QualitySummary,
@@ -96,6 +97,30 @@ class MonitoringSchemaTests(unittest.TestCase):
                         positive_rating_count=positive,
                         accuracy=accuracy,
                     )
+
+    def test_model_accuracy_requires_consistent_counts_and_unique_identity(self):
+        model = ModelAccuracySummary(
+            model_route="llm_content",
+            model_version="m1",
+            attributed_rating_count=2,
+            positive_rating_count=1,
+            accuracy=0.5,
+        )
+        with self.assertRaises(ValidationError):
+            ModelAccuracySummary(
+                model_route="llm_content",
+                model_version="m1",
+                attributed_rating_count=0,
+                positive_rating_count=0,
+                accuracy=1,
+            )
+        with self.assertRaises(ValidationError):
+            QualitySummary(
+                evaluated_rating_count=0,
+                attributed_rating_count=0,
+                positive_rating_count=0,
+                models=[model, model],
+            )
 
     def test_monitor_result_constructs_and_serializes_nested_payload(self):
         result = MonitorResult(

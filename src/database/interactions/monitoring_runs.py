@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from sqlalchemy import delete
 from sqlmodel import Session, select
 
 from src.database.interactions._pagination import (
@@ -19,7 +20,7 @@ from src.database.interactions._shared import (
 from src.database.interactions._shared import (
     list_records as list_model_records,
 )
-from src.database.models import MonitoringRun
+from src.database.models import MonitoringModelAccuracy, MonitoringRun
 from src.monitoring.schemas import MonitorResult
 
 __all__ = [
@@ -53,6 +54,22 @@ def _result_values(result: MonitorResult, run_id: UUID) -> dict[str, Any]:
     }
 
 
+def _model_accuracy_values(
+    result: MonitorResult, run_id: UUID
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "run_id": run_id,
+            "model_route": summary.model_route,
+            "model_version": summary.model_version,
+            "attributed_rating_count": summary.attributed_rating_count,
+            "positive_rating_count": summary.positive_rating_count,
+            "recommendation_accuracy": summary.accuracy,
+        }
+        for summary in result.quality.models
+    ]
+
+
 def _bucket_run_id(result: MonitorResult) -> UUID:
     identity = (
         f"monitoring:{result.window.start.isoformat()}:{result.window.end.isoformat()}"
@@ -65,8 +82,19 @@ def _create(
     result: MonitorResult,
     run_id: UUID | None,
 ) -> MonitoringRun:
-    values = _result_values(result, run_id or _bucket_run_id(result))
-    return create_record(session, MonitoringRun, values)
+    resolved_run_id = run_id or _bucket_run_id(result)
+    record = create_record(
+        session,
+        MonitoringRun,
+        _result_values(result, resolved_run_id),
+    )
+    model_values = _model_accuracy_values(result, resolved_run_id)
+    if model_values:
+        session.execute(
+            dialect_insert(session, MonitoringModelAccuracy).values(model_values)
+        )
+        session.flush()
+    return record
 
 
 def create(
@@ -100,6 +128,21 @@ def _upsert_many(
     session.execute(statement)
     session.flush()
     run_ids = [value["run_id"] for value in values]
+    session.execute(
+        delete(MonitoringModelAccuracy).where(
+            MonitoringModelAccuracy.run_id.in_(run_ids)
+        )
+    )
+    model_values = [
+        values
+        for result, run_id in zip(results, run_ids, strict=True)
+        for values in _model_accuracy_values(result, run_id)
+    ]
+    if model_values:
+        session.execute(
+            dialect_insert(session, MonitoringModelAccuracy).values(model_values)
+        )
+    session.flush()
     return list(
         session.exec(
             select(MonitoringRun)

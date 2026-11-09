@@ -7,15 +7,17 @@ and Psycopg.
 
 ## Organization
 
-The database is organized by table and table-specific interactions. There are 12 tables:
+The database is organized by table and table-specific interactions. There are 13 tables:
 
 `stream_events`, `user_movie_history`, `recommendation_serves`, `users`,
 `llm_usage`, `movies`, `cold_start_jobs`, `cold_start_profiles`,
-`data_quality_logs`, `model_logs`, `licensing_costs`, and `monitoring_runs`.
+`data_quality_logs`, `model_logs`, `licensing_costs`, `monitoring_runs`, and
+`monitoring_model_accuracy`.
 
-Each table has a corresponding module under `src/database/interactions`. Public
-functions validate inputs through `schemas.py`, own their database transaction, and
-commit on success or roll back on failure.
+Tables have a corresponding module under `src/database/interactions`, except
+`monitoring_model_accuracy`, whose child rows are managed atomically through the
+`monitoring_runs` module. Public functions validate inputs through `schemas.py`, own
+their database transaction, and commit on success or roll back on failure.
 
 ## Using the Interaction API
 
