@@ -174,15 +174,42 @@ services:
     depends_on:
       api: {condition: service_healthy}
 
+  kafka-tunnel:
+    <<: *service
+    profiles: [live]
+    command: [bash, /app/deployment/kafka_tunnel.sh]
+    environment:
+      SSHPASS: ${KAFKA_SSH_PASSWORD:-}
+      KAFKA_SSH_KNOWN_HOSTS: ${KAFKA_SSH_KNOWN_HOSTS:-}
+      KAFKA_SSH_HOST: ${KAFKA_SSH_HOST:-128.2.24.239}
+      KAFKA_SSH_USER: ${KAFKA_SSH_USER:-kafkatunnel}
+      KAFKA_SSH_PORT: ${KAFKA_SSH_PORT:-22}
+      KAFKA_REMOTE_HOST: ${KAFKA_REMOTE_HOST:-localhost}
+      KAFKA_REMOTE_PORT: ${KAFKA_REMOTE_PORT:-9092}
+      KAFKA_TUNNEL_LOCAL_PORT: ${KAFKA_TUNNEL_LOCAL_PORT:-9092}
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-}
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-movielog1-recommender}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD-SHELL, "nc -z 127.0.0.1 $${KAFKA_TUNNEL_LOCAL_PORT}"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
   course-stream:
     <<: *service
     profiles: [live]
     command: [python, -m, src.service.course_stream]
+    network_mode: service:kafka-tunnel
     environment:
       <<: *database-connection
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-}
+      KAFKA_BOOTSTRAP_SERVERS: 127.0.0.1:${KAFKA_TUNNEL_LOCAL_PORT:-9092}
       KAFKA_TOPIC: ${KAFKA_TOPIC:-}
-      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-}
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-movielog1-recommender}
       KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
       KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-}
       KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME:-}
@@ -190,6 +217,9 @@ services:
       COURSE_LOG_TIMEZONE: ${COURSE_LOG_TIMEZONE:-UTC}
     depends_on:
       api: {condition: service_healthy}
+      kafka-tunnel:
+        condition: service_healthy
+        restart: true
 
 volumes:
   postgres-data:
