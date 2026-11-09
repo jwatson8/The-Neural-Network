@@ -2,6 +2,7 @@
 import logging
 import os
 import re
+import csv
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -23,13 +24,55 @@ def _event_time(value):
 
 
 def handle_line(store, topic, partition, offset, line):
-    parts = line.strip().split(',', 2)
-    if len(parts) != 3:
+    basic_parts = line.strip().split(',', 2)
+    if len(basic_parts) != 3:
         return 'ignored'
-    _, user_id, event = [part.strip() for part in parts]
+    timestamp, user_id, raw_event = [part.strip() for part in basic_parts]
+    event = raw_event.split(',', 1)[0].strip()
+    try:
+        csv_parts = next(csv.reader([line], strict=True))
+    except csv.Error:
+        csv_parts = []
+    if len(csv_parts) >= 3 and csv_parts[2].strip() in ('watch', 'rating'):
+        timestamp, user_id, event = [part.strip() for part in csv_parts[:3]]
+    if event in ('watch', 'rating'):
+        try:
+            parts = next(csv.reader([line], strict=True))
+        except csv.Error:
+            log_validation_failure(
+                'kafka',
+                [{'loc': ('record',), 'type': 'value_error', 'msg': 'Invalid CSV record'}],
+            )
+            return 'invalid'
+        if len(parts) != 5:
+            log_validation_failure(
+                'kafka',
+                [{'loc': ('record',), 'type': 'value_error', 'msg': 'Expected five CSV fields'}],
+            )
+            return 'invalid'
+        try:
+            event_time = _event_time(timestamp)
+        except ValueError:
+            log_validation_failure(
+                'kafka',
+                [{'loc': ('event_time',), 'type': 'value_error', 'msg': 'Invalid event time'}],
+            )
+            return 'invalid'
+        movie_event = {
+            'user_id': user_id,
+            'event_type': event,
+            'event_time': event_time,
+            'movie_id': parts[3].strip(),
+        }
+        if parts[4].strip():
+            movie_event['rating'] = parts[4].strip()
+        inserted, errors = store.record_movie_event(
+            movie_event, topic, partition, offset
+        )
+        return 'invalid' if inserted is None else event
     if re.fullmatch(r'GET /create_account/?(?:\s+HTTP/\S+)?', event):
         try:
-            event_time = _event_time(parts[0])
+            event_time = _event_time(timestamp)
         except ValueError:
             log_validation_failure(
                 'kafka',
@@ -86,7 +129,14 @@ def main():
     try:
         while True:
             batch = consumer.poll(timeout_ms=1000)
-            counts = {'account': 0, 'recommendation': 0, 'invalid': 0, 'ignored': 0}
+            counts = {
+                'account': 0,
+                'recommendation': 0,
+                'watch': 0,
+                'rating': 0,
+                'invalid': 0,
+                'ignored': 0,
+            }
             for records in batch.values():
                 for record in records:
                     kind = handle_line(store, record.topic, record.partition, record.offset,
@@ -94,10 +144,15 @@ def main():
                     counts[kind] += 1
             if batch:
                 consumer.commit()
-            if counts['account'] or counts['recommendation'] or counts['invalid']:
+            logged_kinds = (
+                'account', 'recommendation', 'watch', 'rating', 'invalid'
+            )
+            if any(counts[kind] for kind in logged_kinds):
                 logger.info(
-                    'course_events accounts=%d recommendations=%d invalid=%d',
-                    counts['account'], counts['recommendation'], counts['invalid'],
+                    'course_events accounts=%d recommendations=%d '
+                    'watches=%d ratings=%d invalid=%d',
+                    counts['account'], counts['recommendation'], counts['watch'],
+                    counts['rating'], counts['invalid'],
                 )
     finally:
         consumer.close()

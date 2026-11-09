@@ -12,6 +12,7 @@ from src.database.models import (
     LicensingCost,
     LLMUsage,
     ModelLog,
+    MonitoringModelAccuracy,
     MonitoringRun,
     MonitoringModelAccuracy,
     Movie,
