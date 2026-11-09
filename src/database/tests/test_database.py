@@ -102,9 +102,7 @@ class DatabaseInteractionTests(unittest.TestCase):
         self.assertEqual(movie.title, "Initial title")
         self.assertEqual(event.rating, 8)
         self.assertEqual(movies.get("movie-1").title, "Updated")
-        self.assertEqual(
-            user_movie_history.get("user-1", "movie-1").latest_rating, 8
-        )
+        self.assertEqual(user_movie_history.get("user-1", "movie-1").latest_rating, 8)
         with self.assertRaises(RecordNotFoundError):
             users.update("missing", age=20)
 
@@ -277,9 +275,7 @@ class DatabaseInteractionTests(unittest.TestCase):
             },
         ]
         self.assertEqual(stream_events.create_many(duplicate_records), 1)
-        self.assertEqual(
-            user_movie_history.get("user-1", "movie-2").latest_rating, 4
-        )
+        self.assertEqual(user_movie_history.get("user-1", "movie-2").latest_rating, 4)
 
     def test_watch_charges_use_a_sliding_24_hour_inactivity_window(self):
         self.seed_catalog()
@@ -448,9 +444,7 @@ class DatabaseInteractionTests(unittest.TestCase):
 
     def test_licensing_cost_postgres_ddl_uses_charge_timestamp(self):
         ddl = str(
-            CreateTable(LicensingCost.__table__).compile(
-                dialect=postgresql.dialect()
-            )
+            CreateTable(LicensingCost.__table__).compile(dialect=postgresql.dialect())
         )
 
         self.assertIn("charged_at TIMESTAMP WITH TIME ZONE", ddl)
@@ -781,11 +775,22 @@ class DatabaseInteractionTests(unittest.TestCase):
 
     def test_public_functions_are_documented_and_hide_sessions(self):
         modules = (
-            users, movies, stream_events, user_movie_history, licensing_costs,
-            recommendation_serves, llm_usage, model_logs, cold_start_profiles,
-            cold_start_jobs, course_requests, database_summary,
+            users,
+            movies,
+            stream_events,
+            user_movie_history,
+            licensing_costs,
+            recommendation_serves,
+            llm_usage,
+            model_logs,
+            cold_start_profiles,
+            cold_start_jobs,
+            course_requests,
+            database_summary,
         )
-        functions = [getattr(module, name) for module in modules for name in module.__all__]
+        functions = [
+            getattr(module, name) for module in modules for name in module.__all__
+        ]
         for function in functions:
             with self.subTest(function=function.__qualname__):
                 self.assertTrue(inspect.getdoc(function))
@@ -799,7 +804,9 @@ class DatabaseInteractionTests(unittest.TestCase):
                 "1,34,programmer,M,space,\n",
                 encoding="utf-8",
             )
-            with gzip.open(data_dir / "movies.csv.gz", "wt", encoding="utf-8") as stream:
+            with gzip.open(
+                data_dir / "movies.csv.gz", "wt", encoding="utf-8"
+            ) as stream:
                 stream.write(
                     "movie_id,title,genres,release_date,runtime,original_language,overview,"
                     "popularity,vote_average,vote_count,imdb_id,tmdb_id,license_cost\n"
@@ -816,23 +823,15 @@ class DatabaseInteractionTests(unittest.TestCase):
 
         self.assertEqual(first["users"], {"created": 1, "skipped_ids": []})
         self.assertEqual(first["movies"], {"created": 1, "skipped_ids": []})
-        self.assertEqual(
-            second["users"], {"created": 0, "skipped_ids": ["1"]}
-        )
-        self.assertEqual(
-            second["movies"], {"created": 0, "skipped_ids": ["movie-1"]}
-        )
+        self.assertEqual(second["users"], {"created": 0, "skipped_ids": ["1"]})
+        self.assertEqual(second["movies"], {"created": 0, "skipped_ids": ["movie-1"]})
         self.assertEqual(first["events_inserted"], 2)
         self.assertEqual(second["events_inserted"], 0)
         history = user_movie_history.get("1", "movie-1")
         self.assertEqual(history.latest_rating, 8)
         self.assertFalse(history.rating_changed)
-        self.assertEqual(
-            history.last_recorded_watch_at, datetime(2025, 1, 1, 0, 0)
-        )
-        self.assertEqual(
-            history.last_recorded_rating_at, datetime(2025, 1, 1, 0, 1)
-        )
+        self.assertEqual(history.last_recorded_watch_at, datetime(2025, 1, 1, 0, 0))
+        self.assertEqual(history.last_recorded_rating_at, datetime(2025, 1, 1, 0, 1))
         with Session(self.engine) as session:
             self.assertEqual(len(session.exec(select(StreamEvent)).all()), 2)
             charges = list(session.exec(select(LicensingCost)).all())

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from decimal import Decimal
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -28,6 +29,10 @@ class PreferenceProfile(BaseModel):
     negative: str
 
 
+class UserNotFoundError(LookupError):
+    """The User API returned no record for the requested user."""
+
+
 def fetch_descriptions(user_id):
     template = os.environ["USER_LOOKUP_URL_TEMPLATE"]
     url = template.format(user_id=quote(user_id, safe=""))
@@ -36,8 +41,26 @@ def fetch_descriptions(user_id):
         headers["Authorization"] = "Bearer " + os.environ["USER_API_BEARER_TOKEN"]
     request = Request(url, headers=headers)
     timeout = float(os.getenv("USER_LOOKUP_TIMEOUT_SECONDS", "3"))
-    with urlopen(request, timeout=timeout) as response:
-        payload = json.load(response)
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            payload = json.load(response)
+    except HTTPError as error:
+        if error.code == 404:
+            raise UserNotFoundError from None
+        if error.code == 400:
+            try:
+                error_payload = json.loads(error.read(4096))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                error_payload = None
+            if error_payload == {"message": "user not found"}:
+                raise UserNotFoundError from None
+        raise
+    except json.JSONDecodeError as error:
+        if not error.doc.strip():
+            raise UserNotFoundError from None
+        raise
+    if payload is None or payload == {} or payload == {"user": None}:
+        raise UserNotFoundError
     if isinstance(payload, dict) and isinstance(payload.get("user"), dict):
         payload = payload["user"]
     likes_field = os.getenv("USER_LIKES_FIELD", "self_description_likes")
@@ -84,13 +107,24 @@ def process_one(store, client, model_name):
             llm_called = True
             profile, usage = generate_profile(client, model_name, likes, dislikes)
             llm_succeeded = True
+            input_tokens = usage.input_tokens if usage is not None else 0
+            output_tokens = usage.output_tokens if usage is not None else 0
             usage_record = llm_usage.create(
                 user_id=user_id,
                 provider="openai",
                 model_name=model_name,
                 status="succeeded",
-                input_tokens=usage.input_tokens if usage else 0,
-                output_tokens=usage.output_tokens if usage else 0,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                estimated_cost_usd=(
+                    (
+                        Decimal(input_tokens) * Decimal("0.15")
+                        + Decimal(output_tokens) * Decimal("0.60")
+                    )
+                    / Decimal("1000000")
+                    if usage is not None
+                    else None
+                ),
             )
             llm_request_id = usage_record.request_id
         else:
@@ -99,6 +133,19 @@ def process_one(store, client, model_name):
             user_id, profile.positive, profile.negative, llm_request_id=llm_request_id
         )
         logger.info("profile_created user_id=%s attempts=%d", user_id, job["attempts"])
+    except UserNotFoundError:
+        try:
+            store.cancel_job(user_id)
+        except Exception as error:
+            store.retry_later(user_id, job["attempts"], type(error).__name__)
+            logger.warning(
+                "profile_cancel_retry user_id=%s attempts=%d error=%s",
+                user_id,
+                job["attempts"],
+                type(error).__name__,
+            )
+        else:
+            logger.info("profile_cancelled user_id=%s reason=user_not_found", user_id)
     except Exception as error:
         if llm_called and not llm_succeeded:
             try:
