@@ -29,6 +29,12 @@ def handle_line(store, topic, partition, offset, line):
         return 'ignored'
     timestamp, user_id, raw_event = [part.strip() for part in basic_parts]
     event = raw_event.split(',', 1)[0].strip()
+    try:
+        csv_parts = next(csv.reader([line], strict=True))
+    except csv.Error:
+        csv_parts = []
+    if len(csv_parts) >= 3 and csv_parts[2].strip() in ('watch', 'rating'):
+        timestamp, user_id, event = [part.strip() for part in csv_parts[:3]]
     if event in ('watch', 'rating'):
         try:
             parts = next(csv.reader([line], strict=True))
