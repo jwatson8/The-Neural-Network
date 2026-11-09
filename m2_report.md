@@ -5,7 +5,9 @@
 
 ### Automated Model Updates (0.5 page max)
 
-#TODO 
+Our [daily updater](https://github.com/jwatson8/The-Neural-Network/blob/main/src/model_updates/daily.py) runs at 2 a.m. Eastern and combines the original dataset with accumulated PostgreSQL interactions to retrain our SVD recommender. It first trains an evaluation candidate using data available before the previous day, then compares it with the current model on that day's held-out ratings. Promotion requires at least 100 evaluated users, a positive one-sided 95% bootstrap lower bound for NDCG@20 improvement, inference p95 below 600 ms, and passing drift checks. An eligible candidate is separately refitted with interactions through the end of that day; the comparison scores describe the evaluation candidate, not this final refit.
+
+With automatic promotion enabled, a [scheduled GitHub workflow](https://github.com/jwatson8/The-Neural-Network/blob/main/.github/workflows/daily-model.yml) runs at 08:17 UTC and invokes [`deployment/daily_model.sh auto`](https://github.com/jwatson8/The-Neural-Network/blob/main/deployment/daily_model.sh) on the VM. The script records comparison evidence in `model_logs`, verifies artifact checksums, backs up the current model, replaces it, and restarts the API. It checks the loaded model and a recommendation response; failed verification triggers rollback. Missing data or failed quality gates retain the current model. Snapshots, hashes, reports, and deployment outcomes make runs traceable; shared locks prevent concurrent training and deployment. The same script can trigger this process manually.
 
 ### Offline Evaluation (1 page of text max, excluding figures)
 
@@ -29,6 +31,12 @@ Validation failures and drift results generate sanitized structured JSON logs, w
 #TODO 
 
 ---
+
+### Continuous Integration (0.5 page max)
+
+Our [GitHub Actions workflow](https://github.com/jwatson8/The-Neural-Network/blob/main/.github/workflows/integration.yml) runs on every push and pull request. On GitHub-hosted Ubuntu with Python 3.12, it installs the declared test dependencies, runs pytest with coverage, and publishes test results and coverage reports as the `test-reports` artifact. Unit tests disable network sockets and use fixtures or mocks for external systems, so they require no production credentials, Kafka access, user/movie API calls, or paid LLM requests.
+
+After tests pass, a Docker verification job validates Compose configuration, builds the service image, trains on the checked-in dataset, and starts isolated containers. It checks API health and recommendation responses, confirms that an empty production-data window preserves the current model, and exercises automatic model promotion, repeat-run protection, audit logging, and rollback using explicitly synthetic comparison evidence. Container logs are saved as `docker-reports`. A separate, manually requested deployment job runs only for `main` after both checks pass; it uses the VM runner and SSH to deploy the tested commit. [Passing main-branch run](https://github.com/jwatson8/The-Neural-Network/actions/runs/42552189761) verifies the infrastructure checks; the synthetic checks establish deployment mechanics, not live model-quality improvement.
 
 ## Final Submission Checklist (remove before submission)
 
