@@ -10,7 +10,7 @@ monitoring_worker
     -> workload
     -> licensing, LLM, and recommendation-quality calculations
     -> five-minute MonitorResult buckets
-    -> monitoring_runs
+    -> monitoring_runs + per-route/version monitoring_model_accuracy rows
     -> Grafana
 ```
 
@@ -35,6 +35,12 @@ Successful buckets are inserted or updated in `monitoring_runs`. Events arriving
 within the one-hour reconciliation period update their original bucket. Failures
 are written to container logs and, when PostgreSQL is available, saved as
 sanitized `monitoring_run_failure` records in `data_quality_logs`.
+
+Recommendation quality is also stored in `monitoring_model_accuracy`, with one
+child row for every route and model version active in the attribution window.
+Ratings can credit multiple route/version pairs when each independently
+recommended the rated movie. Routes with serves but no attributed ratings retain
+a zero sample count and null accuracy.
 
 ## Running
 

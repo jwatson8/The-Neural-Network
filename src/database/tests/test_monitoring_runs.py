@@ -6,10 +6,11 @@ from unittest.mock import patch
 from uuid import UUID
 
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from src.database.interactions import monitoring_runs
-from src.monitoring.schemas import MonitorResult
+from src.database.models import MonitoringModelAccuracy
+from src.monitoring.schemas import ModelAccuracySummary, MonitorResult
 
 
 class MonitoringRunTests(unittest.TestCase):
@@ -52,6 +53,15 @@ class MonitoringRunTests(unittest.TestCase):
                 "attributed_rating_count": 20,
                 "positive_rating_count": 15,
                 "accuracy": 0.75,
+                "models": [
+                    {
+                        "model_route": "collaborative_svd",
+                        "model_version": "m1",
+                        "attributed_rating_count": 4,
+                        "positive_rating_count": 3,
+                        "accuracy": 0.75,
+                    }
+                ],
             },
         )
 
@@ -92,12 +102,41 @@ class MonitoringRunTests(unittest.TestCase):
         self.assertEqual(first.run_id, second.run_id)
         self.assertEqual(len(monitoring_runs.list_records()), 1)
         self.assertEqual(second.total_license_cost, 2)
+        with Session(self.engine) as session:
+            model_accuracy = session.exec(select(MonitoringModelAccuracy)).all()
+        self.assertEqual(len(model_accuracy), 1)
+        self.assertEqual(model_accuracy[0].model_route, "collaborative_svd")
+        self.assertEqual(model_accuracy[0].recommendation_accuracy, 0.75)
         self.assertEqual(
             monitoring_runs.list_windows(
                 start=self.now - timedelta(hours=1), end=self.now
             ),
             {(self.now - timedelta(minutes=5), self.now)},
         )
+
+    def test_bucket_upsert_replaces_model_accuracy_children(self):
+        result = self.result(generated_at=self.now)
+        result.window.start = self.now - timedelta(minutes=5)
+        result.window.end = self.now
+        monitoring_runs.upsert_many([result])
+
+        result.quality.models = [
+            ModelAccuracySummary(
+                model_route="popularity_fallback",
+                model_version="m2",
+                attributed_rating_count=0,
+                positive_rating_count=0,
+                accuracy=None,
+            )
+        ]
+        monitoring_runs.upsert_many([result])
+
+        with Session(self.engine) as session:
+            rows = session.exec(select(MonitoringModelAccuracy)).all()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].model_route, "popularity_fallback")
+        self.assertEqual(rows[0].model_version, "m2")
+        self.assertIsNone(rows[0].recommendation_accuracy)
 
 
 if __name__ == "__main__":

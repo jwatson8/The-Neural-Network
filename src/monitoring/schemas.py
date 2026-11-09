@@ -78,16 +78,51 @@ class LLMSummary(BaseModel):
         return self
 
 
-class QualitySummary(BaseModel):
-    """Recommendation accuracy based on attributed rating events."""
+class ModelAccuracySummary(BaseModel):
+    """Recommendation accuracy for one serving route and model version."""
 
-    evaluated_rating_count: int = Field(ge=0)
+    model_route: str = Field(min_length=1, max_length=100)
+    model_version: str = Field(min_length=1, max_length=255)
     attributed_rating_count: int = Field(ge=0)
     positive_rating_count: int = Field(ge=0)
     accuracy: float | None = Field(default=None, ge=0, le=1)
 
     @model_validator(mode="after")
     def check_accuracy(self):
+        if self.positive_rating_count > self.attributed_rating_count:
+            raise ValueError(
+                "positive_rating_count cannot exceed attributed_rating_count"
+            )
+        if self.attributed_rating_count == 0:
+            if self.accuracy is not None:
+                raise ValueError("accuracy must be None when no ratings are attributed")
+            return self
+        if self.accuracy is None:
+            raise ValueError("accuracy is required when ratings are attributed")
+        expected_accuracy = self.positive_rating_count / self.attributed_rating_count
+        if not isclose(self.accuracy, expected_accuracy, rel_tol=0, abs_tol=1e-12):
+            raise ValueError(
+                "accuracy must equal positive_rating_count / attributed_rating_count"
+            )
+        return self
+
+
+class QualitySummary(BaseModel):
+    """Aggregate and per-model quality based on attributed rating events."""
+
+    evaluated_rating_count: int = Field(ge=0)
+    attributed_rating_count: int = Field(ge=0)
+    positive_rating_count: int = Field(ge=0)
+    accuracy: float | None = Field(default=None, ge=0, le=1)
+    models: list[ModelAccuracySummary] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def check_accuracy(self):
+        identities = [
+            (summary.model_route, summary.model_version) for summary in self.models
+        ]
+        if len(identities) != len(set(identities)):
+            raise ValueError("models must contain unique route and version pairs")
         if self.attributed_rating_count > self.evaluated_rating_count:
             raise ValueError(
                 "attributed_rating_count cannot exceed evaluated_rating_count"

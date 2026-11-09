@@ -83,6 +83,7 @@
     },
     {
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Positive-rating fraction for ratings attributed to each recommendation route and model version. A missing rating is not counted as a negative result.",
       "fieldConfig": {
         "defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "max": 1, "min": 0, "unit": "percentunit"},
         "overrides": []
@@ -99,11 +100,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "WITH buckets AS (SELECT window_end AS time, attributed_rating_count::double precision AS attributed, positive_rating_count::double precision AS positive, recommendation_accuracy::double precision AS bucket_accuracy FROM monitoring_runs WHERE window_end >= CAST($__timeFrom() AS timestamptz) - INTERVAL '24 hours' AND window_end <= CAST($__timeTo() AS timestamptz) AND window_end = window_start + INTERVAL '5 minutes'), series AS (SELECT time, bucket_accuracy, SUM(attributed) OVER window_24h AS rolling_attributed, SUM(positive) OVER window_24h AS rolling_positive FROM buckets WINDOW window_24h AS (ORDER BY time RANGE BETWEEN INTERVAL '23 hours 55 minutes' PRECEDING AND CURRENT ROW)) SELECT time, bucket_accuracy AS \"5-minute accuracy\", CASE WHEN rolling_attributed = 0 THEN NULL ELSE rolling_positive / rolling_attributed END AS \"Rolling 24-hour accuracy\" FROM series WHERE time >= CAST($__timeFrom() AS timestamptz) ORDER BY time",
+          "rawSql": "WITH buckets AS (SELECT run.window_end AS time, accuracy.model_route, accuracy.model_version, accuracy.attributed_rating_count::double precision AS attributed, accuracy.positive_rating_count::double precision AS positive FROM monitoring_model_accuracy AS accuracy JOIN monitoring_runs AS run ON run.run_id = accuracy.run_id WHERE run.window_end >= CAST($__timeFrom() AS timestamptz) - INTERVAL '24 hours' AND run.window_end <= CAST($__timeTo() AS timestamptz) AND run.window_end = run.window_start + INTERVAL '5 minutes'), series AS (SELECT time, model_route, model_version, SUM(attributed) OVER window_24h AS rolling_attributed, SUM(positive) OVER window_24h AS rolling_positive FROM buckets WINDOW window_24h AS (PARTITION BY model_route, model_version ORDER BY time RANGE BETWEEN INTERVAL '23 hours 55 minutes' PRECEDING AND CURRENT ROW)) SELECT time, model_route || ' / ' || model_version AS metric, CASE WHEN rolling_attributed = 0 THEN NULL ELSE rolling_positive / rolling_attributed END AS value FROM series WHERE time >= CAST($__timeFrom() AS timestamptz) ORDER BY time, metric",
           "refId": "A"
         }
       ],
-      "title": "Recommendation Accuracy: 5-Minute and Rolling 24-Hour",
+      "title": "Model Accuracy by Route/Version: Rolling 24-Hour",
       "type": "timeseries"
     },
     {
@@ -197,6 +198,32 @@
       ],
       "title": "Monitoring Failures",
       "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Rolling count of ratings attributed to each route and model version; use this to interpret the accuracy panel's sample size.",
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "min": 0, "unit": "short"},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 31},
+      "id": 8,
+      "options": {
+        "legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH buckets AS (SELECT run.window_end AS time, accuracy.model_route, accuracy.model_version, accuracy.attributed_rating_count::double precision AS attributed FROM monitoring_model_accuracy AS accuracy JOIN monitoring_runs AS run ON run.run_id = accuracy.run_id WHERE run.window_end >= CAST($__timeFrom() AS timestamptz) - INTERVAL '24 hours' AND run.window_end <= CAST($__timeTo() AS timestamptz) AND run.window_end = run.window_start + INTERVAL '5 minutes'), series AS (SELECT time, model_route, model_version, SUM(attributed) OVER window_24h AS rolling_attributed FROM buckets WINDOW window_24h AS (PARTITION BY model_route, model_version ORDER BY time RANGE BETWEEN INTERVAL '23 hours 55 minutes' PRECEDING AND CURRENT ROW)) SELECT time, model_route || ' / ' || model_version AS metric, rolling_attributed AS value FROM series WHERE time >= CAST($__timeFrom() AS timestamptz) ORDER BY time, metric",
+          "refId": "A"
+        }
+      ],
+      "title": "Attributed Ratings by Route/Version: Rolling 24-Hour",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -208,6 +235,6 @@
   "timezone": "browser",
   "title": "Monitoring Overview",
   "uid": "monitoring-overview",
-  "version": 3,
+  "version": 4,
   "weekStart": ""
 }
