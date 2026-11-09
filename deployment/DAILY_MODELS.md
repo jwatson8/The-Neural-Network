@@ -1,6 +1,22 @@
 # Daily model updates
 
-The daily job **prepares and evaluates models; it does not replace production automatically**. A teammate reviews the report and explicitly promotes an eligible candidate. This is a conservative first version of automated updates.
+The daily container prepares and evaluates models. An optional **Automatic daily model promotion** GitHub workflow then applies the same fixed gates, records the decision in PostgreSQL, and promotes eligible candidates without teammate approval. Manual promotion remains available.
+
+## Enable automatic promotion once
+
+1. Merge this change and successfully deploy latest `main` with the existing CI/deployment workflow. Do this before enabling automation: it executes the deployed VM code and running image, not an untested checkout.
+2. Under repository **Settings > Secrets and variables > Actions > Variables**, create the repository variable `AUTOMATIC_MODEL_PROMOTION_ENABLED` with value `true`. This is not a secret or a VM `.env` setting. Set it to `false` to stop future automatic promotions; it does not interrupt an already-running job.
+3. The workflow runs daily at **08:17 UTC (03:17 Eastern standard time / 04:17 Eastern daylight time)**, after the container's 02:00 Eastern training schedule. GitHub may delay scheduled runs. **Run workflow** on `main` can run it sooner without SSH; it always handles yesterday in Eastern time. The runner must stay online. This workflow deliberately has no environment-review gate; restrict repository write access to trusted teammates.
+
+The workflow calls `bash deployment/daily_model.sh auto` from `/home/the-neural-network`. It uses both deployment/training locks, reuses yesterday's saved report or trains if absent, rechecks the fixed metric gates, and records the comparison **before** swapping the model. Database audit failure blocks promotion. `insufficient_data` or rejected candidates are normal successful no-ops; failed evaluations fail the job. Previously promoted or rolled-back dates are not promoted again. Interrupted pending promotions require explicit recovery, not an automatic retry that could overwrite evidence. A failed post-promotion audit makes the job fail without undoing a healthy model; rerunning reconciles the saved outcome with PostgreSQL.
+
+### Where the evidence lives
+
+- `model_logs`: append-only `event_type=test` entries named `daily_comparison_v1` and `daily_deployment_v1`. Their `test_result` JSON contains both models' NDCG/Recall scores, cohort counts, bootstrap improvement bound, p95 latency, drift, hashes, policy version and decision/outcome. Deterministic IDs prevent duplicate entries on retries. These are evaluation/deployment audit tests, not fabricated training rows. Full snapshots and artifacts remain on the VM.
+- `licensing_costs`: existing actual-play cost records are summarized for the evaluation day's context, including missing costs. They are not copied into this table or treated as hypothetical candidate costs.
+- `monitoring_runs`: existing time buckets supply observed positive-rating fraction and sample counts. Overlapping buckets are flagged and not combined into a rate; missing buckets are not assumed to cover the day. These metrics may combine model versions and **do not determine which candidate wins**.
+
+Use the database interaction `model_logs.search(test_type='daily_comparison_v1')` or query `model_logs` to review decisions. Offline NDCG comparison on identical held-out users/catalog remains the promotion criterion. It is a useful proxy, not an A/B experiment or a guarantee of future user behavior. Scores refer to the evaluation candidate; the promoted artifact is a separately validated final refit including yesterday. The GitHub job exposes only a short decision/outcome; it never uploads raw snapshots.
 
 ## After merging and deploying
 
@@ -65,6 +81,6 @@ Code deployment, scheduler training and manual promotion use shared file locks. 
 
 ## Tests and limits
 
-`python -m pytest` includes synthetic temporal split, late-arrival, DST, metric, data-read, rejection, artifact integrity and rollback tests. CI also invokes the job against isolated PostgreSQL and confirms an empty production window leaves the model unchanged. GitHub does not run the real daily job against production.
+`python -m pytest` includes synthetic temporal split, late-arrival, DST, metric, data-read, rejection, audit idempotence, artifact integrity and rollback tests. PR CI invokes the job against isolated PostgreSQL, confirms an empty production window leaves the model unchanged, and tests automatic promotion/retry/rollback with explicitly synthetic scores. PR CI never accesses production; only the enabled main-only scheduled workflow does.
 
-No automatic promotion, live A/B experiment, database ingestion rewrite, LLM call, API metadata fetch, continuous monitoring, or automatic snapshot deletion is introduced here. These are separate tasks. This PR provides the daily training/evaluation structure and a verified promotion mechanism; actual improvement and production update evidence must come from your VM data.
+No live A/B experiment, database ingestion rewrite, LLM call, API metadata fetch, or automatic snapshot deletion is introduced here. Actual improvement and production update evidence must come from your VM data. An empty or incomplete ingestion pipeline can result in daily retention rather than a new model; do not weaken gates just to force a promotion.

@@ -17,10 +17,13 @@ def main():
     model = joblib.load(artifacts / 'model.joblib')
     model['update_metadata'] = dict(version='daily-2000-01-01', training_end_exclusive='2000-01-02T00:00:00Z')
     joblib.dump(model, folder / 'candidate.joblib')
-    write_json(folder / 'report.json', dict(status='awaiting_approval',
+    write_json(folder / 'report.json', dict(day='2000-01-01', status='awaiting_approval',
                eligible_for_manual_promotion=True, model_version='daily-2000-01-01',
                champion_sha256=digest(artifacts / 'model.joblib'),
                candidate_sha256=digest(folder / 'candidate.joblib'),
+               comparison=dict(groups={'all': {'users': 100}}, paired_delta_lower_95=.1,
+                               candidate_p95_ms=1),
+               drift={k: {'status': 'no_drift'} for k in ('events', 'ratings')},
                note='Synthetic CI swap fixture, not a measured model improvement'))
 
 
