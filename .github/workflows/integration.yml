@@ -76,8 +76,11 @@ jobs:
         run: |
           before=$(sha256sum artifacts/model.joblib)
           docker compose run --rm --no-deps --user "$(id -u):$(id -g)" -e CI_DAILY_SMOKE=1 daily-model-updater python -m src.tests.ci_model_swap
-          bash deployment/daily_model.sh promote 2000-01-01
+          bash deployment/daily_model.sh auto 2000-01-01
+          bash deployment/daily_model.sh auto 2000-01-01
+          docker compose run --rm --no-deps daily-model-updater python -c 'from src.database.interactions import model_logs; rows=[r for r in model_logs.list_records() if r.model_name=="daily-2000-01-01"]; assert len(rows)==2; assert {r.test_result["outcome"] for r in rows}=={"eligible","promoted"}'
           bash deployment/daily_model.sh rollback 2000-01-01
+          bash deployment/daily_model.sh auto 2000-01-01
           test "$before" = "$(sha256sum artifacts/model.joblib)"
           cp artifacts/daily/2000-01-01/promotion.json reports/ci-promotion.json
       - name: Collect container evidence

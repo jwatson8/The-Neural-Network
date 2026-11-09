@@ -2,6 +2,7 @@ import gzip
 import inspect
 import os
 import tempfile
+import time
 import unittest
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
@@ -9,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from sqlalchemy import inspect as sqlalchemy_inspect
+from sqlalchemy import BigInteger, inspect as sqlalchemy_inspect
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
@@ -32,7 +33,13 @@ from src.database.interactions import (
     user_movie_history,
     users,
 )
-from src.database.models import LicensingCost, StreamEvent, User, UserMovieHistory
+from src.database.models import (
+    CourseRequest,
+    LicensingCost,
+    StreamEvent,
+    User,
+    UserMovieHistory,
+)
 from src.database.roll_up import roll_up
 from src.database.schemas import StreamEventCreate, UserCreate
 
@@ -666,10 +673,11 @@ class DatabaseInteractionTests(unittest.TestCase):
         record = {
             "topic": "course-logs",
             "partition_id": 2,
-            "offset_id": 19,
+            "offset_id": 2_147_483_648,
             "raw_line": "2026-10-11T12:00:00Z,501,GET /create_account",
         }
 
+        self.assertIsInstance(CourseRequest.__table__.c.offset_id.type, BigInteger)
         self.assertTrue(course_requests.create(**record))
         self.assertFalse(course_requests.create(**record))
         self.assertEqual(
@@ -741,6 +749,26 @@ class DatabaseInteractionTests(unittest.TestCase):
         self.assertEqual(served.recommendations[0]["movie_id"], "movie-1")
         self.assertEqual(claimed.attempts, 1)
         self.assertEqual(cold_start_profiles.get("user-1").positive, "mystery")
+
+    def test_recommendation_duration_can_include_audit_persistence(self):
+        users.create(user_id="timed-user")
+
+        with patch(
+            "src.database.interactions.recommendation_serves.time.perf_counter",
+            side_effect=[10.75],
+        ):
+            record = recommendation_serves.create(
+                user_id="timed-user",
+                served_at=self.now,
+                model_route="popularity_fallback",
+                model_version="test",
+                recommendations=[{"movie_id": "movie-1"}],
+                request_received_at=self.now,
+                serve_duration_ms=0,
+                request_started_at=10.0,
+            )
+
+        self.assertAlmostEqual(record.serve_duration_ms, 750)
 
     def test_low_level_session_supports_atomic_rollback(self):
         with Session(self.engine) as session:

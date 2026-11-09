@@ -16,6 +16,7 @@ from src.database.interactions import (
     cold_start_jobs,
     database_summary,
     recommendation_serves,
+    user_movie_history,
     users,
 )
 from src.data_quality.boundary import (
@@ -26,6 +27,7 @@ from src.data_quality.quality_logging import log_validation_failure
 from src.service.cold_start import recommend_cold_start
 from src.service.model_adapter import recommend, validate_model
 from src.service.store import ProfileStore
+from src.model.routing import uses_svd
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'))
@@ -67,7 +69,10 @@ def create_app(model=None, profile_store=None, config=None):
 
     @app.errorhandler(HTTPException)
     def handle_http_error(error):
-        return jsonify(error=error.name, message=error.description), error.code
+        response = error.get_response()
+        response.data = jsonify(error=error.name, message=error.description).get_data()
+        response.content_type = 'application/json'
+        return response
 
     @app.errorhandler(SQLAlchemyError)
     def handle_database_error(error):
@@ -135,11 +140,11 @@ def create_app(model=None, profile_store=None, config=None):
         )
         if errors:
             log_validation_failure('recommendation_api', errors)
-            message = (
-                'user_id must not be blank'
-                if any(error.get('loc') == ('user_id',) for error in errors)
-                else 'Invalid recommendation request'
+            user_id_error = next(
+                (error for error in errors if error.get('loc') == ('user_id',)),
+                None,
             )
+            message = user_id_error['msg'] if user_id_error else 'Invalid recommendation request'
             return jsonify(error='Bad Request', message=message), 400
         user_id = validated_request['user_id']
 
@@ -149,16 +154,33 @@ def create_app(model=None, profile_store=None, config=None):
         if loaded_model is None:
             return jsonify(error='Service Unavailable', message='Model unavailable'), 503
 
-        if loaded_model['seen'].get(user_id):
-            movie_ids, route = recommend(loaded_model, user_id, k=20)
+        history_rows = user_movie_history.get_user_history(user_id)
+        excluded_movie_ids = {row.movie_id for row in history_rows}
+        excluded_movie_ids.update(
+            str(loaded_model['movies'][index]['movie_id'])
+            for index in loaded_model['seen'].get(user_id, ())
+        )
+        if history_rows and uses_svd(loaded_model, user_id):
+            movie_ids, route = recommend(
+                loaded_model, user_id, k=20,
+                exclude_movie_ids=excluded_movie_ids,
+            )
         else:
             try:
-                result = recommend_cold_start(loaded_model, store, user_id, k=20)
+                result = recommend_cold_start(
+                    loaded_model, store, user_id, k=20,
+                    exclude_movie_ids=excluded_movie_ids,
+                    allow_svd=False,
+                )
             except (SQLAlchemyError, RuntimeError) as error:
                 result = None
                 logger.warning('cold_start_store_read_failed user_id=%s error_type=%s', user_id, type(error).__name__)
             if result is None:
-                movie_ids, route = recommend(loaded_model, user_id, k=20)
+                movie_ids, route = recommend(
+                    loaded_model, user_id, k=20,
+                    exclude_movie_ids=excluded_movie_ids,
+                    allow_svd=False,
+                )
                 try:
                     store.enqueue(user_id)
                 except (SQLAlchemyError, RuntimeError) as error:
@@ -173,7 +195,6 @@ def create_app(model=None, profile_store=None, config=None):
             return jsonify(error='Internal Server Error', message='Recommendation generation failed'), 500
         movie_ids = [item.movie_id for item in response_items]
 
-        elapsed_ms = (time.perf_counter() - started) * 1000
         users.create_missing_many([{'user_id': user_id}])
         recommendation_serves.create(
             user_id=user_id,
@@ -182,8 +203,10 @@ def create_app(model=None, profile_store=None, config=None):
             model_version=app.config['MODEL_VERSION'],
             recommendations=[{'movie_id': movie_id} for movie_id in movie_ids],
             request_received_at=request_received_at,
-            serve_duration_ms=elapsed_ms,
+            serve_duration_ms=0,
+            request_started_at=started,
         )
+        elapsed_ms = (time.perf_counter() - started) * 1000
         logger.info(
             'recommendation user_id=%s route=%s model_version=%s duration_ms=%.2f status=200',
             user_id, route, app.config['MODEL_VERSION'], elapsed_ms,

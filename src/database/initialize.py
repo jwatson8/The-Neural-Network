@@ -11,6 +11,7 @@ def create_tables() -> None:
     engine = get_engine()
     SQLModel.metadata.create_all(engine)
     if engine.dialect.name == "postgresql":
+        # create_all creates missing tables but does not widen existing columns.
         with engine.begin() as connection:
             connection.execute(
                 text(
@@ -28,6 +29,12 @@ def create_tables() -> None:
                 text(
                     "ALTER TABLE monitoring_runs ALTER COLUMN total_license_cost "
                     "TYPE NUMERIC(16, 10)"
+                )
+            )
+            connection.execute(
+                text(
+                    "ALTER TABLE course_requests ALTER COLUMN offset_id "
+                    "TYPE BIGINT"
                 )
             )
 

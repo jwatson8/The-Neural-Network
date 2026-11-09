@@ -1,0 +1,30 @@
+name: Automatic daily model promotion
+on:
+  schedule:
+    # 03:17 EST / 04:17 EDT, after the VM's 02:00 Eastern training job.
+    - cron: '17 8 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main' && vars.AUTOMATIC_MODEL_PROMOTION_ENABLED == 'true'
+    runs-on: [self-hosted, linux, x64, cmu-deploy]
+    timeout-minutes: 120
+    concurrency:
+      group: production-deployment
+      cancel-in-progress: false
+    steps:
+      - name: Evaluate and promote using the deployed code on the VM
+        # No PR checkout or secrets needed: this runner is already on the VM.
+        # No environment approval gate: the repository variable is the one-time opt-in.
+        run: |
+          cd /home/the-neural-network
+          test -f state/deployed-commit.txt
+          test "$(git -c safe.directory="$PWD" rev-parse HEAD)" = "$(cat state/deployed-commit.txt)"
+          test -z "$(git -c safe.directory="$PWD" status --porcelain --untracked-files=no)"
+          bash deployment/daily_model.sh auto
+      - name: Results location
+        if: always()
+        run: |
+          echo 'Daily comparison and deployment outcomes are stored in PostgreSQL model_logs and the VM artifacts/daily/<date>/ directory. Raw user data is not uploaded to GitHub. A successful job can mean the current model was retained; check the decision in the preceding step.' >> "$GITHUB_STEP_SUMMARY"

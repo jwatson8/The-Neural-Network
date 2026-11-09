@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlmodel import Session, select
 
 from src.database.models import (StreamEvent, User, Movie, RecommendationServe,
-                                 LLMUsage, ColdStartProfile)
+                                 LLMUsage, ColdStartProfile, LicensingCost, MonitoringRun)
 from src.database.schemas import StreamEventCreate
 
 
@@ -40,6 +40,10 @@ def capture(engine, start, end, limit=500000):
                 RecommendationServe.served_at >= start, RecommendationServe.served_at < end),
             'usage': select(LLMUsage).where(LLMUsage.occurred_at >= start, LLMUsage.occurred_at < end),
             'profiles': select(ColdStartProfile).where(ColdStartProfile.updated_at < start),
+            'licensing_costs': select(LicensingCost).where(
+                LicensingCost.charged_at >= start, LicensingCost.charged_at < end),
+            'monitoring_runs': select(MonitoringRun).where(
+                MonitoringRun.window_start >= start, MonitoringRun.window_end <= end),
         }
         snapshot = {}
         for name, query in tables.items():

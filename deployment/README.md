@@ -55,7 +55,7 @@ it first rather than overwriting the active artifact. Record the source commit a
 
 ```sh
 sudo env PORT=18082 BIND_ADDRESS=127.0.0.1 docker compose -p neural-network-staging up -d --wait --wait-timeout 120
-sudo docker compose -p neural-network-staging exec -T api python deployment/smoke_test.py
+sudo docker compose -p neural-network-staging exec -T api python -m deployment.smoke_test
 curl --fail --max-time 0.6 http://127.0.0.1:18082/recommend/1
 ```
 
@@ -72,7 +72,7 @@ Stop only the known old API container after confirming its name with
 ```sh
 sudo docker stop neural-network-smoke-api-1
 sudo docker compose up -d --wait --wait-timeout 120
-sudo docker compose exec -T api python deployment/smoke_test.py
+sudo docker compose exec -T api python -m deployment.smoke_test
 curl --fail --max-time 0.6 http://127.0.0.1:8082/recommend/1
 sudo docker compose -p neural-network-staging stop
 ```
@@ -139,8 +139,8 @@ before relying on collection. Health of the API does not prove worker connectivi
 ## 5. Verify the grading evidence
 
 ```sh
-sudo docker compose --profile live exec -T course-stream python deployment/traffic_report.py --list-servers
-sudo docker compose --profile live exec -T course-stream python deployment/traffic_report.py --server 'EXACT_TEAM_SERVER_LABEL' --start 'ACTUAL_WINDOW_START_WITH_TIMEZONE'
+sudo docker compose --profile live exec -T course-stream python -m deployment.traffic_report --list-servers
+sudo docker compose --profile live exec -T course-stream python -m deployment.traffic_report --server 'EXACT_TEAM_SERVER_LABEL' --start 'ACTUAL_WINDOW_START_WITH_TIMEZONE'
 ```
 
 Choose either the submission time for the following 24h, or 24h before submission

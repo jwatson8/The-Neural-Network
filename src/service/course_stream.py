@@ -3,6 +3,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from kafka import KafkaConsumer
 from pydantic import ValidationError
@@ -12,6 +13,15 @@ from src.service.store import ProfileStore
 logger = logging.getLogger(__name__)
 
 
+def _event_time(value):
+    parsed = datetime.fromisoformat(value.strip().replace('Z', '+00:00'))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(
+            tzinfo=ZoneInfo(os.getenv('COURSE_LOG_TIMEZONE', 'UTC'))
+        )
+    return parsed
+
+
 def handle_line(store, topic, partition, offset, line):
     parts = line.strip().split(',', 2)
     if len(parts) != 3:
@@ -19,7 +29,7 @@ def handle_line(store, topic, partition, offset, line):
     _, user_id, event = [part.strip() for part in parts]
     if re.fullmatch(r'GET /create_account/?(?:\s+HTTP/\S+)?', event):
         try:
-            event_time = datetime.fromisoformat(parts[0].strip().replace('Z', '+00:00'))
+            event_time = _event_time(parts[0])
         except ValueError:
             log_validation_failure(
                 'kafka',

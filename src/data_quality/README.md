@@ -121,10 +121,6 @@ python -m unittest discover -s src/tests -p 'test_data_quality*.py' -v
 python -m unittest discover -s src/tests -v
 ```
 
-Current PR verification: focused Flask/Kafka checks passed. The latest focused
-run could not collect `test_daily_updates.py` because an uncommitted test edit
-has an `IndentationError`; the full suite is therefore not verified.
-
 ## Recommendation API
 
 Verified sources:

@@ -22,7 +22,7 @@ def main():
     model = joblib.load(os.environ['MODEL_PATH'])
     with open(os.environ['PROFILE_SEED_PATH'], encoding='utf-8') as stream:
         profiles = json.load(stream)['profiles']
-    known = [str(uid) for uid, seen in model['seen'].items() if seen][:3]
+    known = [str(uid) for uid, seen in model['seen'].items() if len(set(seen)) >= 10][:3]
     cold = [str(uid) for uid in profiles if not model['seen'].get(str(uid))][:2]
     assert len(known) == 3 and len(cold) == 2, 'Need warm users and seeded cold users'
     catalog = {str(movie['movie_id']) for movie in model['movies']}

@@ -45,14 +45,18 @@ class GrafanaProvisioningTests(unittest.TestCase):
         panel_titles = {panel["title"] for panel in dashboard["panels"]}
 
         self.assertEqual(dashboard["uid"], "monitoring-overview")
-        self.assertEqual(len(dashboard["panels"]), 8)
+        self.assertEqual(len(dashboard["panels"]), 7)
         self.assertIn("Successful Run Freshness", panel_titles)
         self.assertIn("Monitoring Failures", panel_titles)
-        self.assertIn("Application Table Row Counts", panel_titles)
-        summary_panel = next(
-            panel for panel in dashboard["panels"]
-            if panel["title"] == "Application Table Row Counts"
+
+        data_view = json.loads(
+            (GRAFANA_ROOT / "dashboards" / "application-data.json").read_text()
         )
+        self.assertEqual(data_view["uid"], "application-data-view")
+        self.assertEqual(data_view["refresh"], "1h")
+        self.assertEqual(len(data_view["panels"]), 1)
+        summary_panel = data_view["panels"][0]
+        self.assertEqual(summary_panel["title"], "Application Table Row Counts")
         summary_query = summary_panel["targets"][0]
         self.assertEqual(summary_query["url"], "http://api:8082/database/summary")
         self.assertEqual(summary_query["url_options"]["method"], "GET")

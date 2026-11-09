@@ -1,13 +1,19 @@
 """Train the real M0 snapshot and verify the Flask adapter preserves its rankings."""
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, create_engine
 
-from src.database.interactions import recommendation_serves
+from src.database.interactions import (
+    movies,
+    recommendation_serves,
+    stream_events,
+    users,
+)
 from src.model.prepare import prepare, DEFAULT_DATA
 from src.model.recommender import load_profiles, recommend, ROOT
 from src.service.api import create_app
@@ -38,6 +44,32 @@ class ModelIntegrationTests(unittest.TestCase):
         self.engine_patch.start()
         self.addCleanup(self.engine_patch.stop)
         self.addCleanup(self.engine.dispose)
+        warm_users = ('1', '2', '3')
+        users.create_missing_many([{"user_id": user_id} for user_id in warm_users])
+        seen_indices = {
+            movie_index
+            for user_id in warm_users
+            for movie_index in self.model['seen'].get(user_id, set())
+        }
+        seen_movies = {
+            str(self.model['movies'][movie_index]['movie_id']): self.model['movies'][movie_index]
+            for movie_index in seen_indices
+        }
+        movies.create_missing_many([
+            {"movie_id": movie_id, "title": movie["title"]}
+            for movie_id, movie in seen_movies.items()
+        ])
+        event_time = datetime.now(UTC)
+        stream_events.create_many(
+            {
+                "user_id": user_id,
+                "movie_id": str(self.model['movies'][movie_index]['movie_id']),
+                "event_type": "watch",
+                "event_time": event_time,
+            }
+            for user_id in warm_users
+            for movie_index in self.model['seen'].get(user_id, set())
+        )
         self.store = ProfileStore()
         self.store.seed_profiles(ROOT / 'src/model/llm_profiles.json')
         self.app = create_app(model=self.model, profile_store=self.store, config={'TESTING': True})

@@ -26,6 +26,19 @@ def _epoch(value):
     return value.timestamp()
 
 
+def iter_course_lines(page_size=1000):
+    """Yield raw course lines a page at a time instead of loading all history."""
+    if not 1 <= page_size <= 1000:
+        raise ValueError('page_size must be between 1 and 1000')
+    offset = 0
+    while True:
+        page = course_requests.list_records(offset=offset, limit=page_size)
+        yield from (record.raw_line for record in page)
+        if len(page) < page_size:
+            return
+        offset += len(page)
+
+
 def summarize(lines, audits, server, start, end, zone):
     counts = Counter()
     used_audits = set()
@@ -98,18 +111,9 @@ def main():
     parser.add_argument('--end', help='Window end; defaults to 24 hours after --start')
     parser.add_argument('--list-servers', action='store_true')
     args = parser.parse_args()
-    records = []
-    offset = 0
-    while True:
-        page = course_requests.list_records(offset=offset, limit=1000)
-        records.extend(page)
-        if len(page) < 1000:
-            break
-        offset += len(page)
-    lines = [record.raw_line for record in records]
     if args.list_servers:
         counts = Counter()
-        for line in lines:
+        for line in iter_course_lines():
             parts = line.strip().split(',', 2)
             if len(parts) == 3:
                 counts[parts[2].split(',', 1)[0].removeprefix('recommendation request ').strip()] += 1
@@ -149,7 +153,7 @@ def main():
         cursor = page.next_cursor
         if cursor is None:
             break
-    result = summarize(lines, audits, args.server, start, end, zone)
+    result = summarize(iter_course_lines(), audits, args.server, start, end, zone)
     result.update(server=args.server, naive_log_timezone=zone,
                   window_start_utc=datetime.fromtimestamp(start, timezone.utc).isoformat(),
                   window_end_utc=datetime.fromtimestamp(end, timezone.utc).isoformat(),

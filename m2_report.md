@@ -13,7 +13,7 @@
 
 ### Online Evaluation (1 page of text max, excluding figures)
 
-#TODO 
+See [Online evaluation](planning/Milestone%202/online_evaluation.md) for the metrics, telemetry, operationalization, and implementation links.
 
 ### Data Quality (0.5 page max)
 

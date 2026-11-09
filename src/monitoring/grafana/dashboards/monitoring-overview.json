@@ -197,34 +197,6 @@
       ],
       "title": "Monitoring Failures",
       "type": "timeseries"
-    },
-    {
-      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "data-view-api"},
-      "fieldConfig": {
-        "defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "unit": "short"},
-        "overrides": [
-          {"matcher": {"id": "byName", "options": "key"}, "properties": [{"id": "displayName", "value": "Table"}]},
-          {"matcher": {"id": "byName", "options": "value"}, "properties": [{"id": "displayName", "value": "Rows"}]}
-        ]
-      },
-      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 31},
-      "id": 8,
-      "options": {"cellHeight": "sm", "showHeader": true},
-      "targets": [
-        {
-          "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "data-view-api"},
-          "format": "table",
-          "parser": "uql",
-          "refId": "A",
-          "source": "url",
-          "type": "json",
-          "url_options": {"method": "GET"},
-          "uql": "parse-json | project kv(\"tables\")",
-          "url": "http://api:8082/database/summary"
-        }
-      ],
-      "title": "Application Table Row Counts",
-      "type": "table"
     }
   ],
   "refresh": "30s",

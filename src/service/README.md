@@ -15,6 +15,13 @@ saved LLM profiles, pending jobs, stream events, recommendation audits, LLM usag
 and captured course requests. Warm users use SVD; users with saved profiles use the
 trained TF-IDF features; users awaiting profiles receive popularity recommendations.
 
+SVD is used only when the loaded model includes interactions with at least
+**10 distinct movies** for the user. Repeated video minutes, repeat ratings, and
+watching then rating the same movie count as one movie; account creation does not
+count. The request also reads `user_movie_history` to exclude movies seen since the
+model was trained. New history does not update SVD factors: users below the trained
+threshold use a saved profile or popularity fallback until retraining and promotion.
+
 `GET /database/summary` is public and returns row counts for each application table.
 `GET /database/cold-start-jobs?status=pending&offset=0&limit=50` returns paginated
 job status, attempts, and timing information (maximum 100 rows per page). These

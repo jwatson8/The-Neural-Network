@@ -20,6 +20,8 @@ from src.model_updates.evaluation import compare, production_report
 from src.service.model_adapter import validate_model, recommend
 from src.data_quality.drift import detect_event_type_drift, detect_rating_drift
 from src.data_quality.quality_logging import log_drift_result
+from src.model_updates.policy import rejection_reasons, POLICY
+from src.model_updates.audit import monitoring_context
 
 
 def digest(path):
@@ -125,6 +127,8 @@ def run(day, artifacts, data_dir=DEFAULT_DATA, snapshot=None, min_users=100):
         heldout = [e for e in events if start <= utc(e['timestamp']) < end]
         fresh = [e for e in normalize_events(snapshot['events']) if start <= utc(e['timestamp']) < end]
         report['production'] = production_report(snapshot, start, end)
+        report['monitoring_context'] = monitoring_context(snapshot)
+        report['policy'] = POLICY
         report['counts'] = dict(history=len(history), heldout=len(heldout), fresh_day_events=len(fresh))
         if not fresh:
             report.update(status='insufficient_data', reason='No fresh PostgreSQL events for this day; check ingestion.')
@@ -150,15 +154,7 @@ def run(day, artifacts, data_dir=DEFAULT_DATA, snapshot=None, min_users=100):
             report['comparison'] = compare(champion, candidate, history, heldout,
                                             profiles, min_users=min_users)
             result = report['comparison']
-            reasons = []
-            if result['groups']['all']['users'] < min_users:
-                reasons.append('Insufficient held-out users with eligible positive ratings')
-            if result['paired_delta_lower_95'] is None or result['paired_delta_lower_95'] <= 0:
-                reasons.append('No positive one-sided 95% paired bootstrap lower bound for NDCG improvement')
-            if result['candidate_p95_ms'] is None or result['candidate_p95_ms'] >= 600:
-                reasons.append('Candidate inference check exceeds 600ms or has no samples')
-            if any(v['status'] != 'no_drift' for v in report['drift'].values()):
-                reasons.append('Drift detected or insufficient drift evidence; investigate before promotion')
+            reasons = rejection_reasons(result, report['drift'], min_users)
             report.update(status='retain_champion' if reasons else 'awaiting_approval', reasons=reasons)
             if not reasons:
                 report['stage'] = 'refit_and_validate'

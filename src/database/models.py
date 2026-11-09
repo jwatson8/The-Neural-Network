@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     JSON,
     CheckConstraint,
     Column,
@@ -204,7 +205,7 @@ class CourseRequest(SQLModel, table=True):
 
     topic: str = Field(primary_key=True, max_length=255)
     partition_id: int = Field(primary_key=True, ge=0)
-    offset_id: int = Field(primary_key=True, ge=0)
+    offset_id: int = Field(primary_key=True, ge=0, sa_type=BigInteger)
     received_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False, index=True)
     raw_line: str = Field(sa_type=Text, nullable=False)
 

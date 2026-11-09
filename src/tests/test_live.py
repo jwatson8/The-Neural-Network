@@ -1,13 +1,15 @@
+import os
 import time
 import unittest
 from datetime import UTC, datetime, timezone
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import call, patch
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, create_engine
 
-from deployment.traffic_report import summarize
+from deployment.traffic_report import iter_course_lines, summarize
 from src.database.interactions import (
     cold_start_profiles,
     course_requests,
@@ -88,6 +90,42 @@ class LiveTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].source, "kafka")
         self.assertNotIn("not-a-date", str(records[0].error_details))
+
+    def test_naive_account_timestamp_uses_configured_course_timezone(self):
+        with patch.dict(os.environ, {"COURSE_LOG_TIMEZONE": "America/New_York"}):
+            result = handle_line(
+                self.store, "topic", 0, 7,
+                "2026-10-11T12:00:00,501,GET /create_account",
+            )
+
+        self.assertEqual(result, "account")
+        event = stream_events.search(
+            user_id="501", event_type="account_created", limit=1
+        ).records[0]
+        self.assertEqual(
+            event.event_time.replace(tzinfo=UTC),
+            datetime(2026, 10, 11, 16, 0, tzinfo=UTC),
+        )
+
+    def test_course_report_lines_are_yielded_pagewise(self):
+        lines = ["first", "second", "third"]
+
+        def read_page(*, offset, limit):
+            return [
+                SimpleNamespace(raw_line=line)
+                for line in lines[offset : offset + limit]
+            ]
+
+        with patch(
+            "deployment.traffic_report.course_requests.list_records",
+            side_effect=read_page,
+        ) as read_records:
+            self.assertEqual(list(iter_course_lines(page_size=2)), lines)
+
+        self.assertEqual(
+            [call.kwargs for call in read_records.call_args_list],
+            [{"offset": 0, "limit": 2}, {"offset": 2, "limit": 2}],
+        )
 
     def test_event_database_failure_propagates_for_consumer_retry(self):
         line = "2026-10-11T12:00:00Z,501,GET /create_account"
