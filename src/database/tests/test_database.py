@@ -73,6 +73,7 @@ class DatabaseInteractionTests(unittest.TestCase):
         self.assertEqual(
             set(inspector.get_table_names()), set(SQLModel.metadata.tables)
         )
+        self.assertIn("monitoring_model_accuracy", inspector.get_table_names())
         self.assertEqual(
             inspector.get_pk_constraint("user_movie_history")["constrained_columns"],
             ["user_id", "movie_id"],
