@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 action=${1:-run}
 day=${2:-$(TZ=America/New_York date -d yesterday +%F)}
 [[ "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || exit 1
-[[ "$action" == run || "$action" == promote || "$action" == rollback ]] || exit 1
+[[ "$action" == run || "$action" == auto || "$action" == promote || "$action" == rollback ]] || exit 1
 exec 9>.deployment.lock
 flock -n 9 || { echo 'Code deployment is running'; exit 1; }
 exec 8>artifacts/.daily.lock
@@ -20,6 +20,20 @@ tool() { "${compose[@]}" run --rm --no-deps --entrypoint python daily-model-upda
 if [[ "$action" == run ]]; then
   tool -m src.model_updates.daily --day "$day"
   exit
+fi
+if [[ "$action" == auto ]]; then
+  if ! tool -m src.model_updates.daily --day "$day"; then
+    tool -m src.model_updates.automatic decide "$day" || true
+    exit 1
+  fi
+  # A database audit must succeed before production is touched. Exit 10 is a normal skip.
+  if tool -m src.model_updates.automatic decide "$day"; then
+    echo 'Automatic comparison checks passed; promoting candidate.'
+  else
+    status=$?
+    [[ "$status" == 10 ]] && exit 0
+    exit "$status"
+  fi
 fi
 verify() {
   expected=$(sha256sum artifacts/model.joblib | cut -d ' ' -f 1)
@@ -47,10 +61,12 @@ fi
 tool -m src.model_updates.promotion stage "$day"
 if verify; then
   tool -m src.model_updates.promotion finish "$day"
+  if [[ "$action" == auto ]]; then tool -m src.model_updates.automatic record "$day"; fi
   echo 'Model promoted and verified.'
 else
   tool -m src.model_updates.promotion rollback "$day"
   verify || { echo 'Rollback artifact restored but API verification failed; inspect containers.' >&2; exit 1; }
+  if [[ "$action" == auto ]]; then tool -m src.model_updates.automatic record "$day"; fi
   echo 'Promotion failed; previous artifact restored and API verified.' >&2
   exit 1
 fi
