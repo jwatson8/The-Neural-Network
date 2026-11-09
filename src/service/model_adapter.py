@@ -1,6 +1,7 @@
 """Inference adapter for existing users in the trained Jace model."""
 
 import numpy as np
+from src.model.routing import uses_svd
 
 
 def validate_model(model):
@@ -24,7 +25,7 @@ def recommend(model, user_id, k=20):
         raise ValueError('k must be between 1 and 20')
 
     seen = model['seen'].get(user_id, set())
-    if seen:
+    if uses_svd(model, user_id):
         user_index = model['ui'][user_id]
         scores = model['user_factors'][user_index] @ model['movie_factors']
         route = 'collaborative_svd'

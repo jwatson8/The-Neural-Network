@@ -13,6 +13,7 @@ from flask import Flask, Response, jsonify
 from src.service.cold_start import recommend_cold_start
 from src.service.model_adapter import recommend, validate_model
 from src.service.store import ProfileStore
+from src.model.routing import uses_svd
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'))
@@ -67,7 +68,7 @@ def create_app(model=None, profile_store=None, config=None):
         if loaded_model is None:
             return Response('Model unavailable', status=503, mimetype='text/plain')
 
-        if loaded_model['seen'].get(user_id):
+        if uses_svd(loaded_model, user_id):
             movie_ids, route = recommend(loaded_model, user_id, k=20)
         else:
             try:

@@ -15,6 +15,10 @@ def recommend_cold_start(model, store, user_id, k=20):
     query = model['vectorizer'].transform([positive, negative])
     matches = (model['content'] @ query.T).toarray()
     scores = matches[:, 0] - 0.7 * matches[:, 1] + 0.02 * model['popularity']
+    # Low-history users can now have watched movies; exclude them on this path too.
+    seen = model['seen'].get(user_id, set())
+    if seen:
+        scores[list(seen)] = -np.inf
     ranked = np.argsort(-scores, kind='stable')
     ids = []
     for index in ranked:
