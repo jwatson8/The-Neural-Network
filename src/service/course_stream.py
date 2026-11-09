@@ -39,6 +39,10 @@ def handle_line(store, topic, partition, offset, line):
             )
             return 'invalid'
         if len(parts) != 5:
+            log_validation_failure(
+                'kafka',
+                [{'loc': ('record',), 'type': 'value_error', 'msg': 'Expected five CSV fields'}],
+            )
             return 'invalid'
         try:
             event_time = _event_time(timestamp)
