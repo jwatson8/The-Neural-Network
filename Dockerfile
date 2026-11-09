@@ -6,6 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY src/requirements.txt src/requirements-service.txt ./src/
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes openssh-client sshpass netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir -r src/requirements.txt -r src/requirements-service.txt
 
 COPY src ./src

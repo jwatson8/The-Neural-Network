@@ -54,6 +54,11 @@ if [[ "${FAIL_CONFIG:-}" == yes && "$*" == *"run --rm --no-deps"* ]]; then exit 
         commands = (self.root / 'commands').read_text()
         self.assertIn('checkout --detach ' + SHA, commands)
         self.assertIn('--profile live up -d --wait', commands)
+        self.assertIn(
+            'run --rm --no-deps kafka-tunnel bash '
+            '/app/deployment/kafka_tunnel.sh --check',
+            commands,
+        )
         self.assertNotIn('down', commands)
         self.assertEqual((self.root / 'state/deployed-commit.txt').read_text().strip(), SHA)
         self.assertEqual((self.root / '.env').read_text(), 'fixture')

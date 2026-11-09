@@ -32,8 +32,10 @@ inference, then validates the generated comma-separated response. Invalid reques
 return 400; invalid generated output returns 500. Validation logs are sanitized
 and do not include raw request or response values.
 
-The live Compose profile adds `src.service.profile_worker` and
-`src.service.course_stream`. Kafka account-created events are persisted to
+The live Compose profile adds `src.service.profile_worker`, an SSH tunnel
+sidecar, and `src.service.course_stream`. The consumer shares the tunnel's
+network namespace and reaches Kafka through `127.0.0.1:9092`; Kafka SASL
+authentication remains configured independently. Kafka account-created events are persisted to
 PostgreSQL `stream_events` as `account_created` records and enqueue profile jobs
 only when no profile is already saved;
 recommendation requests are captured separately as course-request evidence.
