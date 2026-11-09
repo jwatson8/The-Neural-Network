@@ -37,6 +37,12 @@ The live Compose profile adds `src.service.profile_worker` and
 PostgreSQL `stream_events` as `account_created` records and enqueue profile jobs
 only when no profile is already saved;
 recommendation requests are captured separately as course-request evidence.
+Watch and rating events use the CSV row shape
+`timestamp,user_id,event_type,movie_id,rating` (with an empty rating for watches).
+The referenced movie must already exist in the catalog. Each record is keyed by
+its Kafka topic, partition, and offset for replay-safe persistence; accepted watch
+and rating events update `user_movie_history`, and watches also create licensing
+charges.
 Validation failures are logged without raw input. Database errors escape before
 the consumer commits the polled batch, allowing Kafka redelivery after restart;
 there is no in-process retry/backoff loop for these errors. User API and LLM calls

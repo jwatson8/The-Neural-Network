@@ -10,8 +10,10 @@ from src.database.interactions import (
     cold_start_jobs,
     cold_start_profiles,
     course_requests,
+    movies,
     users,
 )
+from src.database.schemas import StreamEventCreate
 from src.data_quality.ingestion import persist_stream_event
 from src.data_quality.quality_logging import LogContext, log_validation_failure
 
@@ -72,6 +74,41 @@ class ProfileStore:
             "event_type": "account_created",
             "event_time": event_time,
         }, context=context)
+
+    def record_movie_event(self, event, topic, partition, offset):
+        from uuid import NAMESPACE_URL, uuid5
+
+        event_id = uuid5(NAMESPACE_URL, f"kafka:{topic}:{partition}:{offset}")
+        context = LogContext(event_id=event_id)
+        try:
+            validated_event = StreamEventCreate.model_validate(
+                {**event, "event_id": event_id}
+            )
+        except ValidationError as error:
+            errors = error.errors(
+                include_url=False, include_context=False, include_input=False
+            )
+            log_validation_failure("kafka", errors, context=context)
+            return None, errors
+        user_id = validated_event.user_id
+        movie_id = validated_event.movie_id
+        if movies.get(movie_id) is None:
+            errors = [{
+                "loc": ("movie_id",),
+                "type": "value_error",
+                "msg": "Unknown movie identifier",
+            }]
+            log_validation_failure("kafka", errors, context=context)
+            return None, errors
+        try:
+            users.create_missing_many([{"user_id": user_id}])
+        except ValidationError as error:
+            errors = error.errors(
+                include_url=False, include_context=False, include_input=False
+            )
+            log_validation_failure("kafka", errors, context=context)
+            return None, errors
+        return persist_stream_event(validated_event.model_dump(), context=context)
 
     def record_course_request(self, topic, partition_id, offset_id, line):
         return course_requests.create(

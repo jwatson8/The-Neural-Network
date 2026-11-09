@@ -4,7 +4,7 @@
 
 No verified production measurement window was available when this section was written. Do not submit synthetic test values as live model performance. Replace this status with a dated export or Grafana screenshot and the aggregate results below once telemetry is available.
 
-At the reviewed main commit `fccffc9`, monitoring calculations and PostgreSQL tables exist, but the main recommendation service still uses `ProfileStore` in SQLite; its Kafka handler does not yet persist watch/rating events to PostgreSQL, and its profile worker does not record LLM usage there. Confirm the team's PostgreSQL integration is merged and deployed and all four input tables (`stream_events`, `recommendation_serves`, `licensing_costs`, `llm_usage`) receive fresh data. Merely starting a healthy monitoring worker can produce empty buckets, not valid evidence of zero activity.
+The PostgreSQL service integration is now merged in PR #43. Confirm that this version is deployed and that all four input tables (`stream_events`, `recommendation_serves`, `licensing_costs`, `llm_usage`) receive fresh production data. Merely starting a healthy monitoring worker can produce empty buckets, not valid evidence of zero activity.
 
 The monitoring services also require the Compose `monitoring` profile; the ordinary deployment workflow does not enable that profile. Follow the [monitoring setup](../../src/monitoring/README.md) and [Grafana access guide](../../src/monitoring/grafana/README.md). The dashboard is **Monitoring / Monitoring Overview**. Record the time range and sample counts with each screenshot.
 

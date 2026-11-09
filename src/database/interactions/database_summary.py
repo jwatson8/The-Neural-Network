@@ -14,6 +14,7 @@ from src.database.models import (
     ModelLog,
     MonitoringModelAccuracy,
     MonitoringRun,
+    MonitoringModelAccuracy,
     Movie,
     RecommendationServe,
     StreamEvent,
