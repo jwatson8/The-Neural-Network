@@ -13,6 +13,7 @@ from src.database.models import (
     LLMUsage,
     ModelLog,
     MonitoringRun,
+    MonitoringModelAccuracy,
     Movie,
     RecommendationServe,
     StreamEvent,
@@ -36,6 +37,7 @@ TABLES = {
     "licensing_costs": LicensingCost,
     "model_logs": ModelLog,
     "monitoring_runs": MonitoringRun,
+    "monitoring_model_accuracy": MonitoringModelAccuracy,
 }
 
 

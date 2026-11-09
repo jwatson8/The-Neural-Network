@@ -1,0 +1,161 @@
+{
+  "dataset_sha256": {
+    "events.csv.gz": "5c61b29f1eab57ae0ff122062390e312f6813c4751eaab466997cdb55b712efb",
+    "movies.csv.gz": "1e0dd97dccaff8cfe65d888cbdaec33e4a2673880818fbc3dcf859dc7806b147",
+    "users.csv.gz": "7a7b2afbb598753af89cad7d865089d03dcaf0c834b2d42275f5918b97343809"
+  },
+  "excluded_positive_pairs": 1,
+  "groups": {
+    "all": {
+      "model": {
+        "ndcg_at_20": 0.1885858774406753,
+        "recall_at_20": 0.17532138665970787
+      },
+      "popularity": {
+        "ndcg_at_20": 0.1885858774406753,
+        "recall_at_20": 0.17532138665970787
+      },
+      "users": 199
+    },
+    "cold": {
+      "model": {
+        "ndcg_at_20": 0.18953833136714335,
+        "recall_at_20": 0.17620684820849428
+      },
+      "popularity": {
+        "ndcg_at_20": 0.18953833136714335,
+        "recall_at_20": 0.17620684820849428
+      },
+      "users": 198
+    },
+    "warm": {
+      "model": {
+        "ndcg_at_20": 0.0,
+        "recall_at_20": 0.0
+      },
+      "popularity": {
+        "ndcg_at_20": 0.0,
+        "recall_at_20": 0.0
+      },
+      "users": 1
+    }
+  },
+  "implementation_sha256": {
+    "app\\coldStartApproach.py": "bedfffa8485a1b6c22030006f4428e5b9be8e6a319d2f60888639eb3fdb9a5b4",
+    "app\\switchBoard.py": "881d98097df5beb264fbd185e11ddcd26c0439a9a08b2ea5df4a5303bcd4cdc4",
+    "app\\utils\\checkIfNewUser.py": "128d66243830d32717a23d861ba00647873e32459ede751d417ee70f9b665d2f",
+    "app\\utils\\dataProvider.py": "9b5fc6fadc8105e3650e905c07f51fd2800858710104299062e54dd78d58560f",
+    "data_quality\\__init__.py": "278d19bd25413ffef0fee4d16a6fe5653b9bbb69df7c440063a0eec47e9706cc",
+    "data_quality\\boundary.py": "6bf70f016282e3e804ebc051fe55a45dbd74e5f3663b90c325a1b84fe7635bde",
+    "data_quality\\database_reader.py": "a1f3affa9ed616e6f4c925dfe4496a3ad804dd3374439ff68b9cf473c09dca91",
+    "data_quality\\drift.py": "d1abd23eb1c7c338e2591d0da23c55455dc453e1b00a8a1cc1865749c5630fdc",
+    "data_quality\\ingestion.py": "8cb5730950cda856b359ad68796fce785d3d6123851b70270b781ffc94bfa34c",
+    "data_quality\\quality_logging.py": "7d5e6c395455dcec9ef048b8a62fe404917c1732ab646dda599914ea87977c28",
+    "database\\__init__.py": "df39b531ef838bf70f580335273256d26b72d6665ecdb170caef770b7f98fc35",
+    "database\\database.py": "44c77df2189c27a8c2620c3c4ee99f9c6b5c52103f11e42e6b0aa773699024ed",
+    "database\\initialize.py": "06fceaeb383af8b026cff1098925fb0a67bf5732855c18bf220bf67b28e8d556",
+    "database\\interactions\\__init__.py": "a7553d8072f77647cf3ad229db9358a61039e0321735a50d667c2f0fa5728f42",
+    "database\\interactions\\_pagination.py": "88e71e3c0b135e5b3c824f3a9499ace05fdb8e4cf9bb998c88ca48c181f14275",
+    "database\\interactions\\_shared.py": "acfe5e88c5625d6bbab1ec9b0a32b13e58aa97eec3c095e532f5782c143fe599",
+    "database\\interactions\\cold_start_jobs.py": "fe6b215a74324b7be339b9836d9b215733bef13bee09330d99e6aec850141d28",
+    "database\\interactions\\cold_start_profiles.py": "46c201a2a56d695f0d23394f489c41642b73d1513ac895258740009e250df728",
+    "database\\interactions\\course_requests.py": "6287418e3127f5ceb24647bf328773c933e55f479636dae8f20748061fbfe767",
+    "database\\interactions\\data_quality_logs.py": "aec9656c588866a71837e8cb7069ba0e8c7e4cb6b812e073d030f82d3e45d798",
+    "database\\interactions\\database_summary.py": "7e403bbba24aba317bbdcdfae0865078fa579b14b7718e3cba703e5971c1cc49",
+    "database\\interactions\\licensing_costs.py": "276e53fb4d3eebc4da2bf4d908011c167f9b792da5c62f04d5aedfbfbe639cc1",
+    "database\\interactions\\llm_usage.py": "a7c18503749f14020dbb3ac98de90174315b062e01aba84b30be7f3a5f7bbaf9",
+    "database\\interactions\\model_logs.py": "d8bd42f1fce9fdd10fcde9cacc49940a548ef5667066c5023e19d9c52c0822b4",
+    "database\\interactions\\monitoring_runs.py": "fd20c318f7b9d3d014e7e5b77d57e102357413d78d8e7c1855de57c66e263ce3",
+    "database\\interactions\\movies.py": "5c8e5510837abf20609579f1c76411ad21418dbbdedcae26b31b75c3ace02b7b",
+    "database\\interactions\\rating_attributions.py": "9a3fb216a58a67528ae99545685a23d5efed4215d7010b64857fd81ef6255e35",
+    "database\\interactions\\recommendation_serves.py": "47c44c6ca606161b7ac40cfcca8cd2bdaf37890b99e770eefe7d28e3fe820c2e",
+    "database\\interactions\\stream_events.py": "425270e5c502dbef6a4fa67e7046eb24451a3a05cc3b8742d9a518d42b28790c",
+    "database\\interactions\\user_movie_history.py": "e22e38e3a8ef7524411d5b589e037533db20278258dfb450ff00c11fda0e51c9",
+    "database\\interactions\\users.py": "18b9f08fff38e137ccee89b6f3513bed3f9a20e54416e06f5ebcc4a77d0371a1",
+    "database\\models.py": "c00f0559e40c515aed168f66438e6ebad924c4c799d790d4de644b3863fed316",
+    "database\\roll_up.py": "78ad537204c2e42ac6e13f5f66fe0d90fb78db2e4e65f7bc932254a1a1581911",
+    "database\\schemas.py": "b1e25f85a20ccff3d260fd5c9681d5756365cb2cf38d13d40818bc5f6ed06365",
+    "database\\tests\\__init__.py": "8f177179debe31ad39bb8910b02ceaa9eadfa5866967dd93c0162b2680d83582",
+    "database\\tests\\test_database.py": "ecd7bb1149db01cf9744c1b3cb3b5dbba7dfd9851d4c247fed30f84510626e7d",
+    "database\\tests\\test_model_logs.py": "33f3d6a863638d0ead6cfe2c79539ec93d3b2a44f1f86578d771d0991df2f9cb",
+    "database\\tests\\test_monitoring_runs.py": "4490969f51d1ad3dc031bcbaab226f5c6b6a0e164bde90df4035ef5cd3e40d1f",
+    "database\\tests\\test_rating_attributions.py": "abfa2c04050688d5a2054faac351f70bddde7cd7195a188f4efb7b7f7f93919e",
+    "model\\__init__.py": "a5635c1b3ab10176f86b47190dd2a244c92717068782dcffa5916e27a62d008b",
+    "model\\prepare.py": "f01ffc2597bda5c0efb9f5f2f4165a3f61c7de03a2322f1f1e6efd6c08a1c353",
+    "model\\recommender.py": "f8b28047586660905383fe2efb78e050f6cff5a7c63c179704ce8e8863df976c",
+    "model\\routing.py": "5f3e8c61db5754598e04d3ca9587a1cf4373cec880a2f4eea40cb9c2a4de3e64",
+    "model_updates\\__init__.py": "f2cf1fc2c905d3fee397f16b0d04f582df67b97950ea04cc4d4b4154bfc508e7",
+    "model_updates\\audit.py": "6f6a6e4afc6ad025c3904c845786655347c1b0db45e7f8abe9d16f585e398474",
+    "model_updates\\automatic.py": "34a38a9f0066f87fe442ddcb3f2af7ab944e370267f4d39d6e2cb28655b8d416",
+    "model_updates\\daily.py": "bd6860c5d3450cb28f292cab1acee9f5dfe7e8e6731a37aa6f35598b49150ae6",
+    "model_updates\\evaluation.py": "3fdb34c9cf896ff6d342cd9303b9995fde8a0a185371154f49f8e78c3daaa30d",
+    "model_updates\\offline.py": "560130e3bfb9f6c14ca36a9a313e316467c3f37c0b1872895f0e59b42c58bddb",
+    "model_updates\\policy.py": "fb289bfad78c22d9bcad3bd4af053d2f1f328a296587a8c113f806248b9adaf2",
+    "model_updates\\promotion.py": "bd18e31aeb619a68e42f5ccfa218ef56fabae2601d76a22861fe2a3b51d0e4e4",
+    "model_updates\\scheduler.py": "9ebf963b219339e1da2bfd62d6d371311717488db4cc6976008b252cff56f5ba",
+    "model_updates\\snapshot.py": "f987fdcca6064e698ec1a2118188e798a466dda986301600d1106a426fc96c45",
+    "monitoring\\buckets.py": "468b44bd9176d6e756911612dbc599a3751f61a47e85765691b88381d3217e3c",
+    "monitoring\\calculations\\__init__.py": "2ef7ab4c869c20b0c550bdbf27ed5051695db3f164dd50d66703679c58982408",
+    "monitoring\\calculations\\license_fees.py": "2127a188a20c7ee7efa16b66259c9ddf38a22d09f3e6f2b51f717807da5c7a5e",
+    "monitoring\\calculations\\live_model_accuracy.py": "9a4e8a024c12aff5a29edbb7e2901c67791a17c3d80442ff931eca34426b1039",
+    "monitoring\\calculations\\llm_costs.py": "1be731bd7d7b7badbe3c69f8d08dfd387ab06a6181b0477be9ececb6368102aa",
+    "monitoring\\grafana\\__init__.py": "249bdd535f43afedc2d81e88b581471030ed1dc7bbe6dd702907c01ff54c11a9",
+    "monitoring\\grafana\\provision_reader.py": "2c9f3a744854b345eb6284030fc1a74b5eed69d6bc37bddce5a14b051b6e7c4f",
+    "monitoring\\monitoring_worker.py": "ac2de13e3dc17d82d014438a9cb5e16cf09228728e7ff150cbfaaf241f6c7c8e",
+    "monitoring\\schemas.py": "aac7cf96839f772715e6a37accf19c3a68e9df917ca74f60f2cde0819ef54c81",
+    "monitoring\\tests\\__init__.py": "9a964d18124ebabc3e34164a400d49ba80017eb1aac0a9f5c400c119794ac647",
+    "monitoring\\tests\\test_grafana.py": "30cefc15507dad3552ec3d1a2085c8a85e83a93473adf069c76a7051fd86fff2",
+    "monitoring\\tests\\test_license_fees.py": "7853c752372039b4962f29ca504660a6e22cbc59a02bbe926897c4b9ec741be4",
+    "monitoring\\tests\\test_live_model_accuracy.py": "b1c69c16f5f33f7c550af54b26a5139861de18a5bc0cca623f34b9020cf1aaad",
+    "monitoring\\tests\\test_llm_costs.py": "cbf6bd0e987895386f0489cedcbf930a4ad68bc292ecc3a932fd1340273c50fe",
+    "monitoring\\tests\\test_monitoring_worker.py": "1bc25e0ff00ce2b18c4b757f20f952900975eed0269c0ddfba5138d17be43535",
+    "monitoring\\tests\\test_schemas.py": "6885c5187991de770d84d9294885ef7347931ae452d39f69f134e6055ba7d612",
+    "monitoring\\tests\\test_workload.py": "ae7462367e9965c56619a8f8405e5272f0fa17045ad9bd83800cc56419171de2",
+    "monitoring\\workload.py": "818e631c24c22ea09d2947abb5f27ee5dfdc2d2682616e3e4aa2b82f92aba50c",
+    "service\\api.py": "256e19f6794abbf07f018c61fb96eb2132afed4070fc1573fa90cd933b8794ad",
+    "service\\cold_start.py": "7e712e0d7624ce6d699f3d4eefe932587ec715eba4a061081f149d8eba44f3ce",
+    "service\\course_stream.py": "f7cb695ad890b891edca1d40d4f2842c45973e9340485eedf0a4933329dd0b57",
+    "service\\model_adapter.py": "ac63303d29cd7c63018b443909769b38359c3e4577c4e0bb05c45aaa765ff097",
+    "service\\profile_worker.py": "ec166063fa9dad558f9ec4a43515182e8737426e71cc6dcdde671c6adb14816d",
+    "service\\store.py": "4edd25edc05eb63728624cf85625a38826ef2ff173b76631278caf81c4388694",
+    "tests\\__init__.py": "9ffadb982fd20eb1e6614912da288dc84865d11761346da18dbfcf8f0b8dbbbb",
+    "tests\\ci_model_swap.py": "a3b638d62c0425bac5064466676dd673a821fb7f3cdd41190387a5e3b2945c52",
+    "tests\\test_automatic_updates.py": "1d8232d96ca39b49e248c20dbc0ec38f73031570a12e0ae8f2628c1493e1f0ce",
+    "tests\\test_cold_threshold.py": "833a03a6ee77e5a8e92c1d916aff990ac11aff14e030608bc00d068e337170f0",
+    "tests\\test_daily_updates.py": "341522cc1124dd3f751d2e9d5a876d3fa83b96ef7bab48496ba33cffb2fe4b06",
+    "tests\\test_data_quality.py": "c0e314285861ab8f7ee1edb0f5343aeb179a4174270b51510e16acddeed65735",
+    "tests\\test_data_quality_database_reader.py": "baefed1d73e0cba07eb1e3428c6c9a8389ed83d196759a93e729f391140371ae",
+    "tests\\test_data_quality_drift.py": "03cc7ea14bfa3fdc6244687d2071f5c4da1da1147c26ff0face1a04ba9834429",
+    "tests\\test_data_quality_logging.py": "4a4f96cace3635b2f63c9bbcc83aae6b37f5e238eb75e08dd60695149678b625",
+    "tests\\test_data_quality_persistence.py": "dab7ce5195665a2dede51bc156b79fff905f4ededbf35e80d9cb7a6c53cc27fa",
+    "tests\\test_data_quality_recommendations.py": "76d46b4969d517385cb4a17c878dbbef744d6279ee952533256350058dac0fba",
+    "tests\\test_data_quality_responses.py": "f0ab549aa8dfde7e1e878db21977607d166b4149d87d3613e01f2d6a3a12cb95",
+    "tests\\test_deployment.py": "0b7929e0467d72c350522912ee57b87a7472b6d241ecf4066db13c21097981c1",
+    "tests\\test_live.py": "944d7092f7f1523c9fcd8f9e74922eb8e252078c9ca2a4addcf4650b6af2035d",
+    "tests\\test_model_integration.py": "9a2c58750178e824dae541d02f2bb90e73079d4e6539f0e48db2928458ddd6ec",
+    "tests\\test_offline_split.py": "b1b9285ca7c9d5ea14dd567261702e2fefeeee225725ad3e2673e272a862ee7c",
+    "tests\\test_service.py": "690cb0646193796be4b309d0bcb0134408bccfdfd301d293369474327ee3c810"
+  },
+  "limitations": [
+    "Fixed metadata snapshot includes the full provided catalog and user IDs.",
+    "No dated historical LLM profiles; cold cohort evaluates popularity fallback only.",
+    "No hyperparameter tuning or separate validation set; test scores were not used to select settings.",
+    "Observed positives are sparse and exposure-biased; offline scores are not causal online effects."
+  ],
+  "measured_at_utc": "2026-11-09T03:59:09.512873+00:00",
+  "settings": {
+    "factors": 32,
+    "k": 20,
+    "min_svd_distinct_movies": 10,
+    "numerical_threads": 1,
+    "positive_rating_at_least": 7,
+    "seed": 42
+  },
+  "split": {
+    "cutoff": "2025-01-31T08:43:00+00:00",
+    "policy": "Global event-time 80th percentile; equal boundary timestamps all in test.",
+    "test_events": 10931,
+    "train_events": 43723,
+    "train_fraction": 0.7999963406155085
+  }
+}
