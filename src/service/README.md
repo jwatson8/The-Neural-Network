@@ -39,8 +39,9 @@ authentication remains configured independently. Kafka account-created events ar
 PostgreSQL `stream_events` as `account_created` records and enqueue profile jobs
 only when no profile is already saved;
 recommendation requests are captured separately as course-request evidence.
-Watch and rating events use the CSV row shape
-`timestamp,user_id,event_type,movie_id,rating` (with an empty rating for watches).
+Watch and rating events use the course stream formats
+`time,user_id,GET /data/m/<movie_id>/<minute>.mpg` and
+`time,user_id,GET /rate/<movie_id>=<rating>`.
 The referenced movie must already exist in the catalog. Each record is keyed by
 its Kafka topic, partition, and offset for replay-safe persistence; accepted watch
 and rating events update `user_movie_history`, and watches also create licensing

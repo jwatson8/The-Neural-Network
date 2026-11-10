@@ -2,8 +2,8 @@
 import logging
 import os
 import re
-import csv
 from datetime import datetime
+from urllib.parse import unquote
 from zoneinfo import ZoneInfo
 
 from kafka import KafkaConsumer
@@ -23,53 +23,43 @@ def _event_time(value):
     return parsed
 
 
+WATCH_RE = re.compile(r'GET /data/m/(?P<movie>[^/\s]+)/(?P<minute>\d+)\.mpg(?:\s+HTTP/\S+)?')
+RATE_RE = re.compile(r'GET /rate/(?P<movie>[^=\s]+)=(?P<rating>\d+)(?:\s+HTTP/\S+)?')
+
+
+def _invalid(field, msg):
+    log_validation_failure(
+        'kafka', [{'loc': (field,), 'type': 'value_error', 'msg': msg}]
+    )
+    return 'invalid'
+
+
 def handle_line(store, topic, partition, offset, line):
     basic_parts = line.strip().split(',', 2)
     if len(basic_parts) != 3:
         return 'ignored'
     timestamp, user_id, raw_event = [part.strip() for part in basic_parts]
     event = raw_event.split(',', 1)[0].strip()
-    try:
-        csv_parts = next(csv.reader([line], strict=True))
-    except csv.Error:
-        csv_parts = []
-    if len(csv_parts) >= 3 and csv_parts[2].strip() in ('watch', 'rating'):
-        timestamp, user_id, event = [part.strip() for part in csv_parts[:3]]
-    if event in ('watch', 'rating'):
-        try:
-            parts = next(csv.reader([line], strict=True))
-        except csv.Error:
-            log_validation_failure(
-                'kafka',
-                [{'loc': ('record',), 'type': 'value_error', 'msg': 'Invalid CSV record'}],
-            )
-            return 'invalid'
-        if len(parts) != 5:
-            log_validation_failure(
-                'kafka',
-                [{'loc': ('record',), 'type': 'value_error', 'msg': 'Expected five CSV fields'}],
-            )
-            return 'invalid'
+    watch = WATCH_RE.fullmatch(event)
+    rate = RATE_RE.fullmatch(event)
+    if watch or rate:
         try:
             event_time = _event_time(timestamp)
         except ValueError:
-            log_validation_failure(
-                'kafka',
-                [{'loc': ('event_time',), 'type': 'value_error', 'msg': 'Invalid event time'}],
-            )
-            return 'invalid'
+            return _invalid('event_time', 'Invalid event time')
+        match = watch or rate
         movie_event = {
             'user_id': user_id,
-            'event_type': event,
+            'event_type': 'watch' if watch else 'rating',
             'event_time': event_time,
-            'movie_id': parts[3].strip(),
+            'movie_id': unquote(match.group('movie')),
         }
-        if parts[4].strip():
-            movie_event['rating'] = parts[4].strip()
+        if rate:
+            movie_event['rating'] = rate.group('rating')
         inserted, errors = store.record_movie_event(
             movie_event, topic, partition, offset
         )
-        return 'invalid' if inserted is None else event
+        return 'invalid' if inserted is None else movie_event['event_type']
     if re.fullmatch(r'GET /create_account/?(?:\s+HTTP/\S+)?', event):
         try:
             event_time = _event_time(timestamp)
