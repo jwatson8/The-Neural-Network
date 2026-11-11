@@ -55,9 +55,9 @@ def handle_line(store, topic, partition, offset, line):
             'movie_id': unquote(match.group('movie')),
         }
         if watch:
-            movie_event['minute_index'] = watch.group('minute')
+            movie_event['minute_index'] = int(watch.group('minute'))
         elif rate:
-            movie_event['rating'] = rate.group('rating')
+            movie_event['rating'] = float(rate.group('rating'))
         inserted, errors = store.record_movie_event(
             movie_event, topic, partition, offset
         )
