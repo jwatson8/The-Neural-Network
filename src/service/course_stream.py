@@ -137,14 +137,14 @@ def main():
             if batch:
                 consumer.commit()
             logged_kinds = (
-                'account', 'recommendation', 'watch', 'rating', 'invalid'
+                'account', 'recommendation', 'watch', 'rating', 'invalid', 'ignored'
             )
             if any(counts[kind] for kind in logged_kinds):
                 logger.info(
                     'course_events accounts=%d recommendations=%d '
-                    'watches=%d ratings=%d invalid=%d',
+                    'watches=%d ratings=%d invalid=%d ignored=%d',
                     counts['account'], counts['recommendation'], counts['watch'],
-                    counts['rating'], counts['invalid'],
+                    counts['rating'], counts['invalid'], counts['ignored'],
                 )
     finally:
         consumer.close()
