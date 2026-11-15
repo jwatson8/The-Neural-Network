@@ -13,12 +13,12 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
-from sqlalchemy import URL, inspect, text
+from sqlalchemy import URL, event, inspect, text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlmodel import SQLModel, create_engine
 
 from src.database.interactions import experiments, experiment_assignments, experiment_reports, recommendation_serves
-from src.database.initialize import create_tables
+from src.database.initialize import create_tables, verify_schema
 from src.database.migrations.add_experimentation_schema import migrate
 from src.database.models import User
 from src.database.schemas import ExperimentCreate, ExperimentAssignmentCreate, ExperimentReportCreate
@@ -159,13 +159,58 @@ class ExperimentMigrationPostgresTests(unittest.TestCase):
                 foreign_keys = lambda inspector: {(tuple(c["constrained_columns"]), c["referred_table"], tuple(c["referred_columns"])) for c in inspector.get_foreign_keys(table)}
                 self.assertEqual(foreign_keys(fresh), foreign_keys(upgraded))
 
-    def test_initializer_upgrades_legacy_schema_and_is_repeatable(self):
-        self.legacy_database()
+    def test_initializer_rejects_legacy_schema_until_explicit_migration(self):
+        # Reproduce a complete pre-experiment deployment, not just a two-table fixture.
+        SQLModel.metadata.create_all(self.test_engine)
+        with self.test_engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE recommendation_serves DROP COLUMN experiment_assignment_id")
+            for table in ("experiment_reports", "experiment_assignments", "experiments"):
+                connection.exec_driver_sql(f"DROP TABLE {table}")
+            connection.execute(text("INSERT INTO users(user_id, first_seen) VALUES ('retained', :now)"), {"now": self.now})
+        statements = []
+        event.listen(self.test_engine, "before_cursor_execute",
+                     lambda conn, cursor, statement, parameters, context, many: statements.append(statement.strip().split()[0].upper()))
+        with patch("src.database.initialize.get_engine", return_value=self.test_engine):
+            with self.assertRaisesRegex(RuntimeError, "requires an explicit migration"):
+                create_tables()
+        self.assertTrue(statements)
+        self.assertEqual(set(statements), {"SELECT"})
+        self.assertFalse(inspect(self.test_engine).has_table("experiments"))
+        self.assertNotIn("experiment_assignment_id", [c["name"] for c in inspect(self.test_engine).get_columns("recommendation_serves")])
+
+        migrate(self.test_engine)
+        statements.clear()
         with patch("src.database.initialize.get_engine", return_value=self.test_engine):
             create_tables()
             create_tables()
+        verify_schema(self.test_engine)
+        self.assertEqual(set(statements), {"SELECT"})
         with self.test_engine.connect() as connection:
-            self.assertIsNone(connection.execute(text(
-                "SELECT experiment_assignment_id FROM recommendation_serves"
-            )).scalar_one())
+            self.assertEqual(connection.execute(text("SELECT user_id FROM users")).scalar_one(), "retained")
             self.assertEqual(connection.execute(text("SELECT count(*) FROM experiments")).scalar_one(), 0)
+
+    def test_initializer_creates_fresh_postgres_schema_without_running_migration(self):
+        with patch("src.database.initialize.get_engine", return_value=self.test_engine), \
+                patch("src.database.migrations.add_experimentation_schema.migrate") as migration:
+            create_tables()
+            create_tables()
+        migration.assert_not_called()
+        self.assertEqual(set(inspect(self.test_engine).get_table_names()), set(SQLModel.metadata.tables))
+        verify_schema(self.test_engine)
+
+    def test_initializer_rejects_unvalidated_assignment_fk_without_repairing_it(self):
+        SQLModel.metadata.create_all(self.test_engine)
+        with self.test_engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE recommendation_serves DROP CONSTRAINT recommendation_serves_experiment_assignment_id_fkey")
+            connection.exec_driver_sql("""ALTER TABLE recommendation_serves
+                ADD CONSTRAINT recommendation_serves_experiment_assignment_id_fkey
+                FOREIGN KEY (experiment_assignment_id) REFERENCES experiment_assignments(assignment_id) NOT VALID""")
+        with patch("src.database.initialize.get_engine", return_value=self.test_engine):
+            with self.assertRaisesRegex(RuntimeError, "foreign key is not validated"):
+                create_tables()
+        with self.test_engine.connect() as connection:
+            self.assertFalse(connection.execute(text("""SELECT convalidated FROM pg_constraint
+                WHERE conrelid='recommendation_serves'::regclass
+                AND conname='recommendation_serves_experiment_assignment_id_fkey'""")).scalar_one())
+        migrate(self.test_engine)
+        verify_schema(self.test_engine)

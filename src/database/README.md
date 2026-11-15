@@ -169,7 +169,9 @@ the command manually is useful for backfills or verifying a standalone database.
 
 ## Running in Production
 
-In `.env`, set `POSTGRES_PASSWORD` to be a secure password, then run:
+For an existing database, complete the migration steps below before deploying
+updated services. For a new database, set a secure `POSTGRES_PASSWORD` in `.env`,
+then run:
 
 ```sh
 docker compose up -d database database-init
@@ -184,18 +186,36 @@ Run the focused database tests with:
 python -m unittest discover -s src/database/tests -v
 ```
 
-`database-init` creates missing tables and applies the experiment schema migration
-on existing PostgreSQL databases. To run that migration separately, set
-`DATABASE_URL` to the intended database and run from the repository root:
+`database-init` creates tables only in an empty schema. For existing databases it
+checks required tables, columns, and the nullable, validated experiment assignment
+FK without issuing DDL. Missing or partial schemas stop initialization with an
+explicit migration error. `create_all()` is never used to fill gaps in an existing
+schema; previous automatic column type adjustments are also no longer performed.
 
-```sh
-python -m src.database.migrations.add_experimentation_schema --apply
-```
+For an existing database, use this deployment order:
 
-The migration is transactional and safe to rerun. Existing recommendation records
-remain unchanged, with a NULL assignment reference. Apply it before starting the
-updated application. Table and index changes acquire locks; test on an isolated
-copy first and retain the additive schema when rolling back application code.
+1. Back up the database and verify the backup before changing its schema.
+2. Run the explicit migration using the reviewed release code and the intended
+   database connection settings, without starting updated services:
+
+   ```sh
+   python -m src.database.migrations.add_experimentation_schema --apply
+   ```
+
+3. Verify the schema with a read-only check:
+
+   ```sh
+   python -m src.database.initialize --check
+   ```
+
+4. Deploy the updated application through the normal deployment process.
+   Deployment scripts do not run the migration automatically.
+
+The migration remains transactional and safe to rerun, with its advisory lock,
+timeouts, and FK validation. Existing recommendation records retain NULL assignment
+references. Table and index changes acquire locks; rehearse on an isolated copy and
+retain the additive schema when rolling back application code. Other schema changes
+require their own explicit migrations.
 
 PostgreSQL migration tests create a temporary local cluster. Set the local binary
 directory to run them; otherwise they are skipped:
