@@ -8,7 +8,7 @@ from src.database.interactions._shared import create_record, run, schema_values
 from src.database.models import ExperimentAssignment
 from src.database.schemas import ExperimentAssignmentCreate
 
-__all__ = ["create", "get", "list_records"]
+__all__ = ["create", "get", "get_for_user", "list_records"]
 
 
 def _create(session: Session, data: ExperimentAssignmentCreate) -> ExperimentAssignment:
@@ -35,3 +35,19 @@ def list_records(*, experiment_id: UUID | None = None, offset: int = 0, limit: i
         statement = statement.where(ExperimentAssignment.experiment_id == experiment_id)
     statement = statement.order_by(ExperimentAssignment.assigned_at.desc(), ExperimentAssignment.assignment_id.desc()).offset(offset).limit(limit)
     return run(lambda session: list(session.exec(statement).all()))
+
+
+def _get_for_user(session: Session, experiment_id: UUID, user_id: str) -> ExperimentAssignment | None:
+    return session.exec(select(ExperimentAssignment).where(
+        ExperimentAssignment.experiment_id == experiment_id,
+        ExperimentAssignment.user_id == user_id,
+    )).one_or_none()
+
+
+def get_for_user(*, experiment_id: UUID, user_id: str) -> ExperimentAssignment | None:
+    """Read an experiment/user assignment using its unique pair, or return None.
+
+    user_id retains the service's string identifier; assignment_id remains the
+    UUID referenced by recommendation serves. No assignment is created here.
+    """
+    return run(lambda session: _get_for_user(session, experiment_id, user_id))

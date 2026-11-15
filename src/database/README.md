@@ -169,9 +169,8 @@ the command manually is useful for backfills or verifying a standalone database.
 
 ## Running in Production
 
-For an existing database, complete the migration steps below before deploying
-updated services. For a new database, set a secure `POSTGRES_PASSWORD` in `.env`,
-then run:
+Back up an existing database before deploying updated services. Set a secure
+`POSTGRES_PASSWORD` in `.env`, then run:
 
 ```sh
 docker compose up -d database database-init
@@ -192,24 +191,22 @@ FK without issuing DDL. Missing or partial schemas stop initialization with an
 explicit migration error. `create_all()` is never used to fill gaps in an existing
 schema; previous automatic column type adjustments are also no longer performed.
 
-For an existing database, use this deployment order:
+Compose runs the dedicated `database-migrate` job after PostgreSQL is healthy.
+It applies the experiment migration before `database-init`, roll-up, and the API;
+a migration failure blocks those dependent services. The job bootstraps the full
+schema only when empty, under the migration transaction and advisory lock.
+`initialize.py` itself continues to verify existing schemas without migrating.
 
-1. Back up the database and verify the backup before changing its schema.
-2. Run the explicit migration using the reviewed release code and the intended
-   database connection settings, without starting updated services:
+The migration can also be run separately with database connection settings:
 
-   ```sh
-   python -m src.database.migrations.add_experimentation_schema --apply
-   ```
+```sh
+python -m src.database.migrations.add_experimentation_schema --apply
+python -m src.database.initialize --check
+```
 
-3. Verify the schema with a read-only check:
-
-   ```sh
-   python -m src.database.initialize --check
-   ```
-
-4. Deploy the updated application through the normal deployment process.
-   Deployment scripts do not run the migration automatically.
+The standalone command requires the existing base tables. Compose adds the explicit
+`--bootstrap-if-empty` option for first-time setup. Back up first, run the migration,
+verify the schema, and then start updated services.
 
 The migration remains transactional and safe to rerun, with its advisory lock,
 timeouts, and FK validation. Existing recommendation records retain NULL assignment
@@ -240,8 +237,17 @@ configuration. `experiment_assignments` records each user's variant, with a uniq
 analysis versions, and JSON results.
 
 Their interaction modules expose `create`, `get`, and bounded `list_records`
-functions. Recommendation serves accept an optional `experiment_assignment_id`;
-the referenced assignment must belong to the served user.
+functions. Reports also support exact experiment-name search with cursor pagination,
+and assignments support lookup by their unique experiment/user pair:
+
+```python
+page = experiment_reports.search(experiment_name="licensing-cost")
+assignment = experiment_assignments.get_for_user(experiment_id=experiment_id, user_id="42")
+```
+
+The assignment UUID remains the primary key. Recommendation serves accept an
+optional `experiment_assignment_id`; the referenced assignment must belong to the
+served user.
 
 Experiments default to `draft` with zero traffic allocation. This phase provides
 storage only; recommendation routing and API responses remain unchanged.
