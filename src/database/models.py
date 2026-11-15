@@ -283,6 +283,11 @@ class RecommendationServe(SQLModel, table=True):
     )
 
     request_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    experiment_assignment_id: UUID | None = Field(
+        default=None,
+        foreign_key="experiment_assignments.assignment_id",
+        index=True,
+    )
     user_id: str = Field(foreign_key="users.user_id", max_length=255, index=True)
     served_at: datetime = Field(
         sa_type=DateTime(timezone=True), nullable=False, index=True
@@ -410,3 +415,80 @@ class ColdStartJob(SQLModel, table=True):
         default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
     )
     last_error: str | None = Field(default=None, sa_type=Text)
+
+
+class Experiment(SQLModel, table=True):
+    __tablename__ = "experiments"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_experiments_name"),
+        CheckConstraint("length(trim(name)) > 0", name="ck_experiment_name"),
+        CheckConstraint(
+            "status IN ('draft', 'running', 'paused', 'completed', 'aborted')",
+            name="ck_experiment_status",
+        ),
+        CheckConstraint(
+            "traffic_allocation >= 0 AND traffic_allocation <= 1 AND "
+            "treatment_allocation >= 0 AND treatment_allocation <= 1",
+            name="ck_experiment_allocation",
+        ),
+        CheckConstraint(
+            "ends_at IS NULL OR (starts_at IS NOT NULL AND ends_at > starts_at)",
+            name="ck_experiment_window",
+        ),
+        CheckConstraint("updated_at >= created_at", name="ck_experiment_timestamps"),
+        CheckConstraint(
+            "length(trim(control_policy)) > 0 AND length(trim(control_version)) > 0 "
+            "AND length(trim(treatment_policy)) > 0 AND length(trim(treatment_version)) > 0",
+            name="ck_experiment_policies",
+        ),
+        Index("ix_experiments_status_starts", "status", "starts_at"),
+    )
+
+    experiment_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    name: str = Field(max_length=255)
+    status: str = Field(default="draft", max_length=20)
+    created_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
+    starts_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    ends_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    control_policy: str = Field(max_length=255)
+    control_version: str = Field(max_length=255)
+    treatment_policy: str = Field(max_length=255)
+    treatment_version: str = Field(max_length=255)
+    traffic_allocation: Decimal = Field(default=Decimal("0"), max_digits=7, decimal_places=6, ge=0, le=1)
+    treatment_allocation: Decimal = Field(default=Decimal("0.5"), max_digits=7, decimal_places=6, ge=0, le=1)
+    config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False))
+
+
+class ExperimentAssignment(SQLModel, table=True):
+    __tablename__ = "experiment_assignments"
+    __table_args__ = (
+        UniqueConstraint("experiment_id", "user_id", name="uq_experiment_assignments_experiment_user"),
+        CheckConstraint("variant IN ('control', 'treatment')", name="ck_experiment_assignment_variant"),
+        Index("ix_experiment_assignments_experiment_variant_assigned", "experiment_id", "variant", "assigned_at"),
+    )
+
+    assignment_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    experiment_id: UUID = Field(foreign_key="experiments.experiment_id")
+    user_id: str = Field(foreign_key="users.user_id", max_length=255, index=True)
+    variant: str = Field(max_length=20)
+    assigned_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
+
+
+class ExperimentReport(SQLModel, table=True):
+    __tablename__ = "experiment_reports"
+    __table_args__ = (
+        CheckConstraint("window_end > window_start", name="ck_experiment_report_window"),
+        CheckConstraint("status IN ('provisional', 'final', 'insufficient_data', 'failed')", name="ck_experiment_report_status"),
+        CheckConstraint("length(trim(analysis_version)) > 0", name="ck_experiment_report_analysis_version"),
+        Index("ix_experiment_reports_experiment_window", "experiment_id", "window_start", "window_end"),
+    )
+
+    report_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    experiment_id: UUID = Field(foreign_key="experiments.experiment_id")
+    generated_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
+    window_start: datetime = Field(sa_type=DateTime(timezone=True), nullable=False)
+    window_end: datetime = Field(sa_type=DateTime(timezone=True), nullable=False)
+    status: str = Field(default="provisional", max_length=30)
+    results: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False))
+    analysis_version: str = Field(max_length=255)

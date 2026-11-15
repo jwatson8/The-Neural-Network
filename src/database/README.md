@@ -7,12 +7,13 @@ and Psycopg.
 
 ## Organization
 
-The database is organized by table and table-specific interactions. There are 14 tables:
+The database is organized by table and table-specific interactions. There are 17 tables:
 
 `stream_events`, `course_requests`, `user_movie_history`, `recommendation_serves`, `users`,
 `llm_usage`, `movies`, `cold_start_jobs`, `cold_start_profiles`,
-`data_quality_logs`, `model_logs`, `licensing_costs`, `monitoring_runs`, and
-`monitoring_model_accuracy`.
+`data_quality_logs`, `model_logs`, `licensing_costs`, `monitoring_runs`,
+`monitoring_model_accuracy`, `experiments`, `experiment_assignments`, and
+`experiment_reports`.
 
 Tables have a corresponding module under `src/database/interactions`, except
 `monitoring_model_accuracy`, whose child rows are managed atomically through the
@@ -183,9 +184,26 @@ Run the focused database tests with:
 python -m unittest discover -s src/database/tests -v
 ```
 
-`database-init` uses `SQLModel.metadata.create_all()` for development and initial
-bootstrap. Use a migration tool such as Alembic before making production schema
-changes.
+`database-init` creates missing tables and applies the Phase 1 experiment migration
+on existing PostgreSQL databases. To run that migration separately, set
+`DATABASE_URL` to the intended database and run from the repository root:
+
+```sh
+python -m src.database.migrations.phase1 --apply
+```
+
+The migration is transactional and safe to rerun. Existing recommendation records
+remain unchanged, with a NULL assignment reference. Apply it before starting the
+updated application. Table and index changes acquire locks; test on an isolated
+copy first and retain the additive schema when rolling back application code.
+
+PostgreSQL migration tests create a temporary local cluster. Set the local binary
+directory to run them; otherwise they are skipped:
+
+```sh
+M3_TEST_POSTGRES_BIN_DIR=/path/to/postgresql/bin \
+  python -m unittest src.database.tests.test_experiment_migration_postgres -v
+```
 
 ## Service Integration
 
@@ -193,3 +211,17 @@ The Flask API, profile worker, and Kafka consumer use the PostgreSQL interaction
 functions for profiles, jobs, recommendation serves, LLM usage, stream events, and
 raw course-request evidence. Kafka request rows are deduplicated by topic, partition,
 and offset so a replay after a failed commit does not duplicate evidence.
+
+## Experiment Persistence
+
+`experiments` stores control/treatment policies, versions, traffic allocation, and
+configuration. `experiment_assignments` records each user's variant, with a unique
+`(experiment_id, user_id)` pair. `experiment_reports` stores report windows,
+analysis versions, and JSON results.
+
+Their interaction modules expose `create`, `get`, and bounded `list_records`
+functions. Recommendation serves accept an optional `experiment_assignment_id`;
+the referenced assignment must belong to the served user.
+
+Experiments default to `draft` with zero traffic allocation. This phase provides
+storage only; recommendation routing and API responses remain unchanged.
