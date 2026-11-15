@@ -5,6 +5,8 @@ No existing database URLs, services, Docker contexts or production resources are
 """
 
 import os
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Event
 from pathlib import Path
 import subprocess
 import tempfile
@@ -15,13 +17,14 @@ from uuid import uuid4
 
 from sqlalchemy import URL, event, inspect, text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
-from sqlmodel import SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
-from src.database.interactions import experiments, experiment_assignments, experiment_reports, recommendation_serves
+from src.database.interactions import experiments, experiment_assignments, experiment_reports, recommendation_serves, users
 from src.database.initialize import create_tables, verify_schema
 from src.database.migrations.add_experimentation_schema import migrate
-from src.database.models import User
-from src.database.schemas import ExperimentCreate, ExperimentAssignmentCreate, ExperimentReportCreate
+from src.database.models import User, Experiment
+from src.database.schemas import ExperimentCreate, ExperimentAssignmentCreate, ExperimentReportCreate, ExperimentLifecycleUpdate
+from src.experimentation.manager import DecisionReason, ExperimentManager
 
 BIN_DIR = os.getenv("M3_TEST_POSTGRES_BIN_DIR")
 
@@ -214,3 +217,121 @@ class ExperimentMigrationPostgresTests(unittest.TestCase):
                 AND conname='recommendation_serves_experiment_assignment_id_fkey'""")).scalar_one())
         migrate(self.test_engine)
         verify_schema(self.test_engine)
+
+
+    def assignment_experiment(self):
+        SQLModel.metadata.create_all(self.test_engine)
+        return experiments.create(ExperimentCreate(
+            name="concurrent-assignment", status="running", starts_at=self.now,
+            created_at=self.now, updated_at=self.now, traffic_allocation="1",
+            control_policy="baseline", control_version="v1",
+            treatment_policy="cost-rerank", treatment_version="v2",
+        ))
+
+    def test_concurrent_get_or_create_returns_one_unchanged_winner(self):
+        with patch("src.database.database.get_engine", return_value=self.test_engine):
+            experiment = self.assignment_experiment()
+            users.create(user_id="concurrent-user")
+            barrier = Barrier(8)
+
+            def assign(index):
+                barrier.wait(timeout=10)
+                return experiment_assignments.get_or_create(ExperimentAssignmentCreate(
+                    experiment_id=experiment.experiment_id, user_id="concurrent-user",
+                    variant="control" if index % 2 else "treatment",
+                    assigned_at=self.now + timedelta(seconds=index),
+                ))
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(pool.map(assign, range(8)))
+            self.assertEqual(sum(created for _, created in results), 1)
+            self.assertEqual(len({record.assignment_id for record, _ in results}), 1)
+            self.assertEqual(len({(record.variant, record.assigned_at) for record, _ in results}), 1)
+            self.assertEqual(len(experiment_assignments.list_records()), 1)
+
+    def test_concurrent_manager_decisions_persist_one_assignment(self):
+        with patch("src.database.database.get_engine", return_value=self.test_engine):
+            experiment = self.assignment_experiment()
+            users.create(user_id="concurrent-user")
+            barrier = Barrier(8)
+
+            def decide(_):
+                barrier.wait(timeout=10)
+                return ExperimentManager(enabled=True).decide(experiment_id=experiment.experiment_id,
+                    user_id="concurrent-user", eligible=True, now=self.now)
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                decisions = list(pool.map(decide, range(8)))
+            self.assertTrue(all(decision.assigned for decision in decisions))
+            self.assertEqual(sum(decision.newly_assigned for decision in decisions), 1)
+            self.assertEqual(len({decision.assignment_id for decision in decisions}), 1)
+            self.assertEqual(len({decision.variant for decision in decisions}), 1)
+            self.assertEqual(len(experiment_assignments.list_records()), 1)
+
+    def test_lifecycle_row_lock_blocks_decision_until_pause_commits(self):
+        with patch("src.database.database.get_engine", return_value=self.test_engine):
+            experiment = self.assignment_experiment()
+            users.create(user_id="waiting-user")
+            read_attempted = Event()
+
+            def observe_read(conn, cursor, statement, parameters, context, many):
+                if "FROM experiments" in statement and "FOR SHARE" in statement:
+                    read_attempted.set()
+
+            event.listen(self.test_engine, "before_cursor_execute", observe_read)
+            self.addCleanup(event.remove, self.test_engine, "before_cursor_execute", observe_read)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                with Session(self.test_engine) as session:
+                    locked = session.exec(select(Experiment).where(
+                        Experiment.experiment_id == experiment.experiment_id
+                    ).with_for_update()).one()
+                    future = pool.submit(ExperimentManager(enabled=True).decide,
+                        experiment_id=experiment.experiment_id, user_id="waiting-user",
+                        eligible=True, now=self.now)
+                    self.assertTrue(read_attempted.wait(timeout=10))
+                    self.assertFalse(future.done())
+                    locked.status = "paused"
+                    session.add(locked)
+                    session.commit()
+                decision = future.result(timeout=10)
+            self.assertEqual(decision.reason, DecisionReason.INACTIVE)
+            self.assertEqual(experiment_assignments.list_records(), [])
+
+    def test_decision_shared_lock_holds_until_assignment_commits(self):
+        with patch("src.database.database.get_engine", return_value=self.test_engine):
+            experiment = self.assignment_experiment()
+            users.create(user_id="assigning-user")
+            insert_started, release_insert, transition_attempted = Event(), Event(), Event()
+            original = experiment_assignments._get_or_create
+
+            def held_insert(session, data):
+                result = original(session, data)
+                insert_started.set()
+                if not release_insert.wait(timeout=10):
+                    raise RuntimeError("test did not release assignment transaction")
+                return result
+
+            def observe_transition(conn, cursor, statement, parameters, context, many):
+                if "FROM experiments" in statement and "FOR UPDATE" in statement:
+                    transition_attempted.set()
+
+            event.listen(self.test_engine, "before_cursor_execute", observe_transition)
+            self.addCleanup(event.remove, self.test_engine, "before_cursor_execute", observe_transition)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                with patch("src.database.interactions.experiment_assignments._get_or_create", side_effect=held_insert):
+                    deciding = pool.submit(ExperimentManager(enabled=True).decide,
+                        experiment_id=experiment.experiment_id, user_id="assigning-user",
+                        eligible=True, now=self.now)
+                    try:
+                        self.assertTrue(insert_started.wait(timeout=10))
+                        pausing = pool.submit(experiments.transition, ExperimentLifecycleUpdate(
+                            experiment_id=experiment.experiment_id, status="paused", occurred_at=self.now))
+                        self.assertTrue(transition_attempted.wait(timeout=10))
+                        self.assertFalse(pausing.done())
+                    finally:
+                        release_insert.set()
+                    self.assertTrue(deciding.result(timeout=10).assigned)
+                    self.assertEqual(pausing.result(timeout=10).status, "paused")
+            self.assertEqual(len(experiment_assignments.list_records()), 1)
+            self.assertEqual(ExperimentManager(enabled=True).decide(experiment_id=experiment.experiment_id,
+                user_id="assigning-user", eligible=True, now=self.now).reason, DecisionReason.INACTIVE)

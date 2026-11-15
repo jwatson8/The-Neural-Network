@@ -6,7 +6,7 @@ from math import isnan
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import ConfigDict, FiniteFloat, field_validator, model_validator
+from pydantic import ConfigDict, FiniteFloat, StrictBool, field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
 
@@ -348,4 +348,34 @@ class ExperimentReportCreate(DatabaseSchema):
         _normalize_experiment_times(self, ("generated_at", "window_start", "window_end"))
         if self.window_end <= self.window_start:
             raise ValueError("window_end must be later than window_start")
+        return self
+
+
+class ExperimentLifecycleUpdate(DatabaseSchema):
+    experiment_id: UUID
+    status: Literal["draft", "running", "paused", "completed", "aborted"]
+    occurred_at: datetime
+
+    @model_validator(mode="after")
+    def validate_time(self):
+        _normalize_experiment_times(self, ("occurred_at",))
+        return self
+
+
+class ExperimentDecisionRequest(DatabaseSchema):
+    experiment_id: UUID
+    user_id: str = Field(min_length=1, max_length=255)
+    eligible: StrictBool
+    now: datetime
+
+    @field_validator("user_id")
+    @classmethod
+    def nonblank_user(cls, value):
+        if not value.strip():
+            raise ValueError("user_id must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def validate_time(self):
+        _normalize_experiment_times(self, ("now",))
         return self

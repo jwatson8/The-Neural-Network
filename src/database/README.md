@@ -240,8 +240,10 @@ configuration. `experiment_assignments` records each user's variant, with a uniq
 analysis versions, and JSON results.
 
 Their interaction modules expose `create`, `get`, and bounded `list_records`
-functions. Recommendation serves accept an optional `experiment_assignment_id`;
+functions. Assignments also provide `get_for_user` and concurrent `get_or_create`;
+experiments provide validated lifecycle transitions. Recommendation serves accept an optional `experiment_assignment_id`;
 the referenced assignment must belong to the served user.
 
-Experiments default to `draft` with zero traffic allocation. This phase provides
-storage only; recommendation routing and API responses remain unchanged.
+Experiments default to `draft` with zero traffic allocation. The opt-in
+[Experiment Manager](../experimentation/README.md) checks eligibility and persists
+sticky assignments. Flask routing and recommendation API responses remain unchanged.
