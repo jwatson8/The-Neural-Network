@@ -19,7 +19,7 @@ from sqlmodel import SQLModel, create_engine
 
 from src.database.interactions import experiments, experiment_assignments, experiment_reports, recommendation_serves
 from src.database.initialize import create_tables
-from src.database.migrations.phase1 import migrate
+from src.database.migrations.add_experimentation_schema import migrate
 from src.database.models import User
 from src.database.schemas import ExperimentCreate, ExperimentAssignmentCreate, ExperimentReportCreate
 

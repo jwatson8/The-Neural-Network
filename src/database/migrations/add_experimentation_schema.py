@@ -1,4 +1,4 @@
-"""Apply the frozen Phase 1 PostgreSQL DDL atomically and idempotently."""
+"""Apply the experiment schema PostgreSQL DDL atomically and idempotently."""
 
 import argparse
 from pathlib import Path
@@ -15,7 +15,7 @@ def migrate(engine: Engine) -> None:
     advisory lock and bounded lock/statement timeouts. Does not enable experiments.
     """
     if engine.dialect.name != "postgresql":
-        raise ValueError("Phase 1 migration requires PostgreSQL")
+        raise ValueError("Experiment schema migration requires PostgreSQL")
     statements = SQL_PATH.read_text(encoding="utf-8").split("\n-- next\n")
     with engine.begin() as connection:
         for statement in statements:

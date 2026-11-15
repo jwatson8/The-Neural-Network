@@ -184,12 +184,12 @@ Run the focused database tests with:
 python -m unittest discover -s src/database/tests -v
 ```
 
-`database-init` creates missing tables and applies the Phase 1 experiment migration
+`database-init` creates missing tables and applies the experiment schema migration
 on existing PostgreSQL databases. To run that migration separately, set
 `DATABASE_URL` to the intended database and run from the repository root:
 
 ```sh
-python -m src.database.migrations.phase1 --apply
+python -m src.database.migrations.add_experimentation_schema --apply
 ```
 
 The migration is transactional and safe to rerun. Existing recommendation records

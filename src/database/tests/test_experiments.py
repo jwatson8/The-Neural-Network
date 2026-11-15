@@ -19,7 +19,7 @@ from src.database.interactions import (
     experiments, experiment_assignments, experiment_reports,
     recommendation_serves, users,
 )
-from src.database.migrations.phase1 import migrate
+from src.database.migrations.add_experimentation_schema import migrate
 from src.database.models import Experiment, ExperimentAssignment, ExperimentReport, RecommendationServe
 from src.database.schemas import ExperimentCreate, ExperimentAssignmentCreate, ExperimentReportCreate
 

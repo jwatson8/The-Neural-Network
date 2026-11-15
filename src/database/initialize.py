@@ -10,7 +10,7 @@ from src.database.database import get_engine
 def create_tables() -> None:
     engine = get_engine()
     if engine.dialect.name == "postgresql":
-        from src.database.migrations.phase1 import migrate
+        from src.database.migrations.add_experimentation_schema import migrate
 
         # Upgrade legacy deployments before create_all can create any new tables.
         inspector = inspect(engine)
