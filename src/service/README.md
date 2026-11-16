@@ -94,10 +94,11 @@ RecommendationRouter.serve(request, decision, control) -> ServingResult
 
 The request includes user ID, immutable excluded movie IDs and `k=20`. The trusted
 hosting adapter must report recommendation IDs, actual model version, actual route,
-actual policy, fallback path, and whether the request was fulfilled. It must resolve
-and run the requested version rather than echoing decision metadata. No Treatment
-algorithm or multi-model hosting is supplied. Alvajoy can inject an adapter at app
-construction without changing the Flask request path.
+actual policy, fallback path, and whether the request was fulfilled. It must run the requested policy/model pin rather than echoing decision metadata.
+Optional `policy_version` distinguishes a policy/configuration version from the
+actual `model_version`; older adapters retain their model-version matching contract.
+Multi-model hosting is not supplied. Alvajoy can inject an adapter at app construction
+without changing the Flask request path.
 
 Absent Treatment, inference exceptions, invalid/empty/duplicate/seen outputs,
 unfulfilled requests, fallback metadata, or policy/version mismatches all use the
@@ -138,3 +139,21 @@ stub serving, with no live hosting or production experiment data:
 ```sh
 python -m pytest src/tests/test_experiment_api.py src/tests/test_service.py
 ```
+
+
+## Cost-aware Treatment
+
+The optional built-in `CostAwareTreatmentServer` expands candidates from the same
+SVD, saved-profile, and popularity paths, then applies a catalog-license-cost
+penalty. Both experimentation and `COST_AWARE_TREATMENT_ENABLED` remain off by
+default. Registration alone does not activate or create an experiment.
+
+Use policy `cost_aware_rerank` and generate its version with
+`treatment_version(actual_model_version, CostAwareConfig(...))`. The actual bundle
+version remains in recommendation audits; policy/configuration version and the
+underlying route are recorded separately in structured logs. Reference ranking
+prices come from `movies`, not the observed `licensing_costs` ledger.
+
+See [Cost-aware Reranking](../experimentation/cost_aware_reranking.md) for the
+scoring equation, conservative lambda default, bounded pool/lookup behavior,
+missing-price rules, injection contract, diagnostic command and limitations.

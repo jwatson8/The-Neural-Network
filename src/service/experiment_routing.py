@@ -16,6 +16,7 @@ class ServingRequest:
     user_id: str
     exclude_movie_ids: frozenset[str]
     k: int = 20
+    has_history: bool = False
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,8 @@ class ServingResult:
     fulfilled attests that the requested policy/version actually ran. The router
     also checks metadata and output; it never substitutes requested metadata for
     actual values. fallback_path describes any deviation from requested serving.
+    policy_version optionally pins a recommendation policy/configuration separately
+    from the actual model_version. underlying_route retains its candidate method.
     """
 
     recommendations: tuple[str, ...]
@@ -33,6 +36,8 @@ class ServingResult:
     policy: str
     fallback_path: str | None = None
     fulfilled: bool = False
+    policy_version: str | None = None
+    underlying_route: str | None = None
 
 
 class TreatmentServer(Protocol):
@@ -45,7 +50,7 @@ def _matches(result: ServingResult, decision: ExperimentDecision) -> bool:
     return (
         result.fulfilled is True
         and result.policy == decision.policy
-        and result.model_version == decision.version
+        and (result.policy_version if result.policy_version is not None else result.model_version) == decision.version
         and result.model_version.strip().lower() not in ("", "unknown")
     )
 
@@ -55,6 +60,16 @@ def _valid_treatment(result: object, request: ServingRequest, decision: Experime
         return False
     if not all(isinstance(value, str) and value.strip() and len(value) <= maximum
                for value, maximum in ((result.model_version, 255), (result.model_route, 100), (result.policy, 255))):
+        return False
+    if result.policy_version is not None and (
+        not isinstance(result.policy_version, str) or not result.policy_version.strip()
+        or len(result.policy_version) > 255
+    ):
+        return False
+    if result.underlying_route is not None and (
+        not isinstance(result.underlying_route, str) or not result.underlying_route.strip()
+        or len(result.underlying_route) > 100
+    ):
         return False
     if not isinstance(result.recommendations, tuple) or not all(isinstance(item, str) for item in result.recommendations):
         return False

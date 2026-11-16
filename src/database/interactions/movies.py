@@ -20,7 +20,7 @@ from src.database.interactions._shared import (
 from src.database.models import Movie
 from src.database.schemas import MovieCreate, MovieUpdate
 
-__all__ = ["create", "get", "update", "list_records", "create_missing_many"]
+__all__ = ["create", "get", "update", "list_records", "create_missing_many", "get_license_costs"]
 
 ### ----------- Helper Functions -----------
 
@@ -156,3 +156,27 @@ def create_missing_many(
     """Insert absent movies atomically and return IDs left unchanged."""
     validated = [MovieCreate.model_validate(record) for record in records]
     return run(lambda session: _create_missing_many(session, validated))
+
+
+def get_license_costs(movie_ids: Iterable[str]) -> dict[str, Decimal | None]:
+    """Read catalog membership and reference prices in one bounded SELECT.
+
+    Missing keys mean nonexistent catalog movies; None means an existing movie
+    with unknown price. This reads movies, never the observed licensing ledger.
+    At most 500 distinct IDs are accepted; an empty request performs no query.
+    """
+    ids = []
+    seen = set()
+    for movie_id in movie_ids:
+        if not isinstance(movie_id, str) or not movie_id.strip() or len(movie_id) > 255:
+            raise ValueError("movie IDs must be nonblank strings of at most 255 characters")
+        if movie_id not in seen:
+            ids.append(movie_id)
+            seen.add(movie_id)
+        if len(ids) > 500:
+            raise ValueError("at most 500 distinct movie IDs may be fetched")
+    if not ids:
+        return {}
+    return run(lambda session: dict(session.exec(
+        select(Movie.movie_id, Movie.license_cost).where(Movie.movie_id.in_(ids))
+    ).all()))

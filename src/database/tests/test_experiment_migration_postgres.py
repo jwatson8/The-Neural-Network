@@ -425,3 +425,56 @@ class ExperimentMigrationPostgresTests(unittest.TestCase):
             self.assertEqual(records[0].model_route, 'popularity_fallback')
             self.assertEqual(experiment_assignments.get_for_user(
                 experiment_id=experiment.experiment_id, user_id='http-user').variant, 'treatment')
+
+    def test_cost_aware_flask_treatment_uses_batch_prices_and_actual_model_pin(self):
+        from src.database.interactions import movies
+        from src.experimentation.cost_reranking import POLICY, CostAwareConfig, treatment_version
+        from src.service.api import create_app
+        from src.service.store import ProfileStore
+        from src.tests.test_service import make_model
+
+        SQLModel.metadata.create_all(self.test_engine)
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            model = make_model()
+            movies.create_missing_many([dict(movie_id=movie['movie_id'], title=movie['movie_id'],
+                license_cost='.1' if index % 3 else '10') for index, movie in enumerate(model['movies'])])
+            experiment = experiments.create(ExperimentCreate(
+                name='postgres-cost-aware', status='running', starts_at=self.now,
+                traffic_allocation='1', treatment_allocation='1',
+                control_policy='legacy', control_version='pg-model-v1', treatment_policy=POLICY,
+                treatment_version=treatment_version('pg-model-v1', CostAwareConfig())))
+            price_queries = []
+            observer = lambda conn, cursor, statement, parameters, context, many: price_queries.append(statement) if 'FROM movies' in statement else None
+            event.listen(self.test_engine, 'before_cursor_execute', observer)
+            self.addCleanup(event.remove, self.test_engine, 'before_cursor_execute', observer)
+            app = create_app(model=model, profile_store=ProfileStore(), config={
+                'TESTING': True, 'MODEL_VERSION': 'pg-model-v1', 'EXPERIMENTS_ENABLED': True,
+                'EXPERIMENT_ID': str(experiment.experiment_id), 'COST_AWARE_TREATMENT_ENABLED': True})
+            response = app.test_client().get('/recommend/pg-user')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.mimetype, 'text/plain')
+            self.assertEqual(len(response.get_data(as_text=True).split(',')), 20)
+            records = recommendation_serves.list_records()
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0].model_route, 'cost_aware:popularity_fallback')
+            self.assertEqual(records[0].model_version, 'pg-model-v1')
+            assignment = experiment_assignments.get_for_user(experiment_id=experiment.experiment_id, user_id='pg-user')
+            self.assertEqual(records[0].experiment_assignment_id, assignment.assignment_id)
+            self.assertEqual(len(price_queries), 1)
+
+    def test_catalog_price_batch_handles_postgres_null_zero_nan_and_negative(self):
+        from decimal import Decimal
+        from src.database.interactions import movies
+        from src.experimentation.cost_reranking import reference_price
+
+        SQLModel.metadata.create_all(self.test_engine)
+        with self.test_engine.begin() as connection:
+            connection.exec_driver_sql("""INSERT INTO movies(movie_id, title, license_cost)
+                VALUES ('zero', 'Zero', 0), ('unknown', 'Unknown', NULL),
+                       ('nan', 'Invalid', 'NaN'::numeric), ('negative', 'Invalid', -1)""")
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            prices = movies.get_license_costs(['zero', 'unknown', 'nan', 'negative', 'absent'])
+        self.assertNotIn('absent', prices)
+        self.assertEqual(reference_price(prices['zero']), Decimal(0))
+        for movie_id in ('unknown', 'nan', 'negative'):
+            self.assertIsNone(reference_price(prices[movie_id]))

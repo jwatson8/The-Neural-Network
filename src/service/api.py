@@ -48,6 +48,10 @@ def create_app(
         EXPERIMENTS_ENABLED=False,
         EXPERIMENT_ID=None,
         CONTROL_SERVING_POLICY="legacy",
+        COST_AWARE_TREATMENT_ENABLED=False,
+        COST_AWARE_WEIGHT="0.15",
+        COST_AWARE_CANDIDATE_MULTIPLIER=5,
+        COST_AWARE_MAX_CANDIDATES=200,
         MODEL_PATH=os.getenv(
             'MODEL_PATH',
             str(Path(__file__).resolve().parents[2] / 'artifacts' / 'model.joblib'),
@@ -71,7 +75,6 @@ def create_app(
     if not isinstance(control_policy, str) or not control_policy.strip() or len(control_policy) > 255:
         raise ValueError('CONTROL_SERVING_POLICY must be a nonblank string of at most 255 characters')
     manager = experiment_manager if experiment_manager is not None else ExperimentManager(enabled=enabled)
-    router = RecommendationRouter(treatment=treatment_server)
     eligibility = experiment_eligibility if experiment_eligibility is not None else lambda context: True
 
     model_sha256 = None
@@ -92,6 +95,24 @@ def create_app(
             store.seed_profiles(app.config['PROFILE_SEED_PATH'])
         except Exception as error:
             logger.warning('profile_seed_failed error_type=%s', type(error).__name__)
+    cost_aware_enabled = app.config['COST_AWARE_TREATMENT_ENABLED']
+    if not isinstance(cost_aware_enabled, bool):
+        raise ValueError('COST_AWARE_TREATMENT_ENABLED must be a boolean')
+    if enabled and cost_aware_enabled:
+        if treatment_server is not None:
+            raise ValueError('Choose an injected Treatment or the built-in cost-aware adapter, not both')
+        if model is not None:
+            from src.experimentation.cost_reranking import CostAwareConfig
+            from src.service.cost_aware_treatment import CostAwareTreatmentServer
+            from src.service.recommendation_candidates import LoadedModelCandidates
+
+            treatment_server = CostAwareTreatmentServer(
+                LoadedModelCandidates(model, store), app.config['MODEL_VERSION'],
+                CostAwareConfig(app.config['COST_AWARE_WEIGHT'],
+                                app.config['COST_AWARE_CANDIDATE_MULTIPLIER'],
+                                app.config['COST_AWARE_MAX_CANDIDATES']),
+            )
+    router = RecommendationRouter(treatment=treatment_server)
     app.extensions['recommendation_model'] = model
     app.extensions['profile_store'] = store
     app.extensions['experiment_manager'] = manager
@@ -190,7 +211,8 @@ def create_app(
             str(loaded_model['movies'][index]['movie_id'])
             for index in loaded_model['seen'].get(user_id, ())
         )
-        context = ServingRequest(user_id=user_id, exclude_movie_ids=frozenset(excluded_movie_ids))
+        context = ServingRequest(user_id=user_id, exclude_movie_ids=frozenset(excluded_movie_ids),
+                                 has_history=bool(history_rows))
         decision = None
         experiment_reason = 'disabled'
         user_ensured = False
@@ -281,11 +303,12 @@ def create_app(
         if enabled:
             logger.info(
                 'experiment_serve request_id=%s assignment_id=%s intended_assignment_id=%s intended_variant=%s '
-                'actual_policy=%s fallback_path=%s fulfilled=%s decision=%s',
+                'actual_policy=%s policy_version=%s underlying_route=%s fallback_path=%s fulfilled=%s decision=%s',
                 request_id, exposure.get('experiment_assignment_id'),
                 decision.assignment_id if decision is not None else None,
                 decision.variant if decision is not None else None,
-                served.policy, served.fallback_path, bool(exposure), experiment_reason,
+                served.policy, served.policy_version, served.underlying_route,
+                served.fallback_path, bool(exposure), experiment_reason,
             )
         return response
 

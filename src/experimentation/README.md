@@ -84,6 +84,7 @@ Unix sockets when using pytest-socket. No test connects to an existing database.
 
 Flask now provides explicit experiment selection, an opt-in enable flag, injectable
 eligibility, user creation before decisions and truthful assignment-linked serves.
-Model hosting, final Treatment policy, cohort definitions and cold-start profile/
-version coordination remain team integration dependencies. Assignment is not proof
+An opt-in [cost-aware Treatment](cost_aware_reranking.md) now covers all three
+existing scoring paths. Model hosting, live parameter/cohort approval and cold-start
+profile/version coordination remain team integration dependencies. Assignment is not proof
 of exposure or client delivery; see the service attribution contract.
