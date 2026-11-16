@@ -84,7 +84,7 @@ class ExperimentMigrationPostgresTests(unittest.TestCase):
         self.legacy_database()
         with self.test_engine.connect() as connection:
             before = connection.execute(text("SELECT * FROM recommendation_serves")).one()
-        migrate(self.test_engine)
+        migrate(self.test_engine, bootstrap_if_empty=True)
         migrate(self.test_engine)
         with self.test_engine.connect() as connection:
             after = connection.execute(text("SELECT * FROM recommendation_serves")).one()
@@ -335,3 +335,39 @@ class ExperimentMigrationPostgresTests(unittest.TestCase):
             self.assertEqual(len(experiment_assignments.list_records()), 1)
             self.assertEqual(ExperimentManager(enabled=True).decide(experiment_id=experiment.experiment_id,
                 user_id="assigning-user", eligible=True, now=self.now).reason, DecisionReason.INACTIVE)
+    def test_compose_migration_bootstraps_empty_schema_under_lock_and_repeats(self):
+        statements = []
+        observer = lambda conn, cursor, statement, parameters, context, many: statements.append(statement)
+        event.listen(self.test_engine, "before_cursor_execute", observer)
+        self.addCleanup(event.remove, self.test_engine, "before_cursor_execute", observer)
+        migrate(self.test_engine, bootstrap_if_empty=True)
+        migrate(self.test_engine, bootstrap_if_empty=True)
+        verify_schema(self.test_engine)
+        self.assertEqual(set(inspect(self.test_engine).get_table_names()), set(SQLModel.metadata.tables))
+        lock_index = next(i for i, statement in enumerate(statements) if "pg_advisory_xact_lock" in statement)
+        create_index = next(i for i, statement in enumerate(statements) if statement.lstrip().startswith("CREATE TABLE"))
+        self.assertLess(lock_index, create_index)
+        with self.test_engine.connect() as connection:
+            self.assertEqual(connection.execute(text("SELECT count(*) FROM experiments")).scalar_one(), 0)
+
+    def test_compose_bootstrap_ddl_rolls_back_on_failure(self):
+        original = SQLModel.metadata.create_all
+
+        def fail_after_bootstrap(connection):
+            original(connection)
+            raise RuntimeError("simulated bootstrap failure")
+
+        with patch.object(SQLModel.metadata, "create_all", side_effect=fail_after_bootstrap):
+            with self.assertRaisesRegex(RuntimeError, "simulated bootstrap failure"):
+                migrate(self.test_engine, bootstrap_if_empty=True)
+        self.assertEqual(inspect(self.test_engine).get_table_names(), [])
+        migrate(self.test_engine, bootstrap_if_empty=True)
+        verify_schema(self.test_engine)
+
+    def test_compose_migration_does_not_bootstrap_partial_existing_schema(self):
+        User.__table__.create(self.test_engine)
+        with patch.object(SQLModel.metadata, "create_all") as create_all:
+            with self.assertRaises(ProgrammingError):
+                migrate(self.test_engine, bootstrap_if_empty=True)
+        create_all.assert_not_called()
+        self.assertEqual(inspect(self.test_engine).get_table_names(), ["users"])
