@@ -371,3 +371,57 @@ class ExperimentMigrationPostgresTests(unittest.TestCase):
                 migrate(self.test_engine, bootstrap_if_empty=True)
         create_all.assert_not_called()
         self.assertEqual(inspect(self.test_engine).get_table_names(), ["users"])
+
+    def test_flask_treatment_exposure_persists_actual_metadata_and_assignment(self):
+        from unittest.mock import Mock
+        from src.service.api import create_app
+        from src.service.experiment_routing import ServingResult
+        from src.service.store import ProfileStore
+        from src.tests.test_service import make_model
+
+        SQLModel.metadata.create_all(self.test_engine)
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            experiment = experiments.create(ExperimentCreate(
+                name='http-exposure', status='running', starts_at=self.now,
+                traffic_allocation='1', treatment_allocation='1',
+                control_policy='legacy', control_version='baseline-v1',
+                treatment_policy='stub-treatment', treatment_version='treatment-v1'))
+            provider = Mock(return_value=ServingResult(('movie-1', 'movie-2'), 'treatment-v1',
+                                                       'stub_route', 'stub-treatment', fulfilled=True))
+            app = create_app(model=make_model(), profile_store=ProfileStore(),
+                config={'TESTING': True, 'MODEL_VERSION': 'baseline-v1', 'EXPERIMENTS_ENABLED': True,
+                        'EXPERIMENT_ID': str(experiment.experiment_id)}, treatment_server=provider)
+            response = app.test_client().get('/recommend/http-user')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_data(as_text=True), 'movie-1,movie-2')
+            records = recommendation_serves.list_records()
+            self.assertEqual(len(records), 1)
+            assignment = experiment_assignments.get_for_user(experiment_id=experiment.experiment_id, user_id='http-user')
+            self.assertEqual(records[0].experiment_assignment_id, assignment.assignment_id)
+            self.assertEqual((records[0].model_version, records[0].model_route), ('treatment-v1', 'stub_route'))
+            provider.assert_called_once()
+
+    def test_flask_unsupported_treatment_preserves_assignment_without_exposure(self):
+        from src.service.api import create_app
+        from src.service.store import ProfileStore
+        from src.tests.test_service import make_model
+
+        SQLModel.metadata.create_all(self.test_engine)
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            experiment = experiments.create(ExperimentCreate(
+                name='http-fallback', status='running', starts_at=self.now,
+                traffic_allocation='1', treatment_allocation='1',
+                control_policy='legacy', control_version='baseline-v1',
+                treatment_policy='unavailable', treatment_version='not-hosted'))
+            app = create_app(model=make_model(), profile_store=ProfileStore(),
+                config={'TESTING': True, 'MODEL_VERSION': 'baseline-v1', 'EXPERIMENTS_ENABLED': True,
+                        'EXPERIMENT_ID': str(experiment.experiment_id)})
+            response = app.test_client().get('/recommend/http-user')
+            self.assertEqual(response.status_code, 200)
+            records = recommendation_serves.list_records()
+            self.assertEqual(len(records), 1)
+            self.assertIsNone(records[0].experiment_assignment_id)
+            self.assertEqual(records[0].model_version, 'baseline-v1')
+            self.assertEqual(records[0].model_route, 'popularity_fallback')
+            self.assertEqual(experiment_assignments.get_for_user(
+                experiment_id=experiment.experiment_id, user_id='http-user').variant, 'treatment')

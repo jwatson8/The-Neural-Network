@@ -1,7 +1,8 @@
 # Experiment Manager
 
 The manager returns a typed, persistent assignment decision for an explicitly
-selected experiment. It is disabled by default and is not called by Flask.
+selected experiment. It is disabled by default; Flask integration requires explicit
+configuration as described in the [service README](../service/README.md).
 
 ## Interface
 
@@ -81,7 +82,8 @@ Concurrent PostgreSQL tests reuse the disposable local cluster described in the
 [database README](../database/README.md); set `M3_TEST_POSTGRES_BIN_DIR` and allow
 Unix sockets when using pytest-socket. No test connects to an existing database.
 
-Flask still needs an enable flag, experiment selection and eligibility rules,
-user creation before decisions, policy/artifact resolution, fallback handling,
-and assignment IDs linked to actual recommendation serves. Model hosting and
-cold-start profile/version coordination remain separate integration dependencies.
+Flask now provides explicit experiment selection, an opt-in enable flag, injectable
+eligibility, user creation before decisions and truthful assignment-linked serves.
+Model hosting, final Treatment policy, cohort definitions and cold-start profile/
+version coordination remain team integration dependencies. Assignment is not proof
+of exposure or client delivery; see the service attribution contract.
