@@ -108,10 +108,27 @@ field names; an optional user API bearer token is supported. Kafka supports
 PLAINTEXT/SSL/SASL settings; custom certificates require a mounted CA file and Compose
 configuration matching the course instructions. Do not disable TLS verification.
 
+The course Kafka broker is reached through a Compose-managed SSH tunnel. Store
+both the gateway password and the verified host-key line in the VM's private
+`.env` file:
+
+```sh
+KAFKA_SSH_PASSWORD=ENTER_THE_GATEWAY_PASSWORD
+KAFKA_SSH_KNOWN_HOSTS="128.2.24.239 ssh-ed25519 ENTER_THE_VERIFIED_PUBLIC_KEY"
+```
+
+Keep `.env` out of Git and set its mode to `0600`. Copy the complete host-key
+line already present in the VM's trusted `~/.ssh/known_hosts`; do not populate
+it from an unverified network scan. Kafka authentication remains separate and uses
+`SASL_PLAINTEXT`, mechanism `PLAIN`, username `students`, and the configured
+`KAFKA_SASL_PASSWORD`. The consumer group defaults to
+`movielog1-recommender`. The tunnel stays in the foreground inside its container;
+no separate terminal or background `ssh -f` process is needed.
+
 ```sh
 sudo docker compose --profile live config --quiet
 sudo docker compose --profile live up -d --wait --wait-timeout 120
-sudo docker compose logs --tail=80 cold-start-worker course-stream
+sudo docker compose logs --tail=80 kafka-tunnel cold-start-worker course-stream
 ```
 
 Check a real newly created user: Kafka queues the account; `profile_created`

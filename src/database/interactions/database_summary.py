@@ -5,6 +5,9 @@ from sqlalchemy import func
 
 from src.database.interactions._shared import run
 from src.database.models import (
+    Experiment,
+    ExperimentAssignment,
+    ExperimentReport,
     ColdStartJob,
     ColdStartProfile,
     CourseRequest,
@@ -25,6 +28,9 @@ from src.database.models import (
 __all__ = ["counts"]
 
 TABLES = {
+    "experiments": Experiment,
+    "experiment_assignments": ExperimentAssignment,
+    "experiment_reports": ExperimentReport,
     "users": User,
     "movies": Movie,
     "stream_events": StreamEvent,

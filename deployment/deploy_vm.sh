@@ -35,11 +35,8 @@ import os
 required = ("USER_LOOKUP_URL_TEMPLATE", "OPENAI_API_KEY")
 missing = [key for key in required if not os.getenv(key, "").strip()]
 assert not missing, "Missing live configuration: " + ", ".join(missing)'
-  "${compose[@]}" run --rm --no-deps course-stream python -c '
-import os
-required = ("KAFKA_BOOTSTRAP_SERVERS", "KAFKA_TOPIC", "KAFKA_GROUP_ID")
-missing = [key for key in required if not os.getenv(key, "").strip()]
-assert not missing, "Missing live configuration: " + ", ".join(missing)'
+  "${compose[@]}" run --rm --no-deps kafka-tunnel \
+    bash /app/deployment/kafka_tunnel.sh --check
 fi
 "${compose[@]}" up -d --wait --wait-timeout 120
 "${compose[@]}" exec -T api python -c '

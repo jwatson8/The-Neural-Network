@@ -75,15 +75,15 @@ class LiveTests(unittest.TestCase):
         movies.create(movie_id="live-movie", title="Live movie")
         watch = handle_line(
             self.store, "topic", 0, 10,
-            "2026-10-11T12:00:00Z,501,watch,live-movie,",
+            "2026-10-11T12:00:00Z,501,GET /data/m/live-movie/0.mpg",
         )
         replay = handle_line(
             self.store, "topic", 0, 10,
-            "2026-10-11T12:00:00Z,501,watch,live-movie,",
+            "2026-10-11T12:00:00Z,501,GET /data/m/live-movie/0.mpg",
         )
         rating = handle_line(
             self.store, "topic", 0, 11,
-            "2026-10-11T12:30:00Z,501,rating,live-movie,8",
+            "2026-10-11T12:30:00Z,501,GET /rate/live-movie=8",
         )
 
         self.assertEqual((watch, replay, rating), ("watch", "watch", "rating"))
@@ -100,13 +100,13 @@ class LiveTests(unittest.TestCase):
                 topic="topic",
                 partition=0,
                 offset=10,
-                value=b"2026-10-11T12:00:00Z,501,watch,live-movie,",
+                value=b"2026-10-11T12:00:00Z,501,GET /data/m/live-movie/0.mpg",
             ),
             SimpleNamespace(
                 topic="topic",
                 partition=0,
                 offset=11,
-                value=b"2026-10-11T12:30:00Z,501,rating,live-movie,8",
+                value=b"2026-10-11T12:30:00Z,501,GET /rate/live-movie=8",
             ),
         ]
         consumer = SimpleNamespace(
@@ -140,7 +140,7 @@ class LiveTests(unittest.TestCase):
     def test_unknown_movie_stream_event_is_logged_and_not_persisted(self):
         result = handle_line(
             self.store, "topic", 0, 12,
-            "2026-10-11T12:00:00Z,501,watch,missing-movie,",
+            "2026-10-11T12:00:00Z,501,GET /data/m/missing-movie/0.mpg",
         )
 
         self.assertEqual(result, "invalid")

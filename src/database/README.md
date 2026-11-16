@@ -7,12 +7,13 @@ and Psycopg.
 
 ## Organization
 
-The database is organized by table and table-specific interactions. There are 14 tables:
+The database is organized by table and table-specific interactions. There are 17 tables:
 
 `stream_events`, `course_requests`, `user_movie_history`, `recommendation_serves`, `users`,
 `llm_usage`, `movies`, `cold_start_jobs`, `cold_start_profiles`,
-`data_quality_logs`, `model_logs`, `licensing_costs`, `monitoring_runs`, and
-`monitoring_model_accuracy`.
+`data_quality_logs`, `model_logs`, `licensing_costs`, `monitoring_runs`,
+`monitoring_model_accuracy`, `experiments`, `experiment_assignments`, and
+`experiment_reports`.
 
 Tables have a corresponding module under `src/database/interactions`, except
 `monitoring_model_accuracy`, whose child rows are managed atomically through the
@@ -168,7 +169,8 @@ the command manually is useful for backfills or verifying a standalone database.
 
 ## Running in Production
 
-In `.env`, set `POSTGRES_PASSWORD` to be a secure password, then run:
+Back up an existing database before deploying updated services. Set a secure
+`POSTGRES_PASSWORD` in `.env`, then run:
 
 ```sh
 docker compose up -d database database-init
@@ -183,9 +185,42 @@ Run the focused database tests with:
 python -m unittest discover -s src/database/tests -v
 ```
 
-`database-init` uses `SQLModel.metadata.create_all()` for development and initial
-bootstrap. Use a migration tool such as Alembic before making production schema
-changes.
+`database-init` creates tables only in an empty schema. For existing databases it
+checks required tables, columns, and the nullable, validated experiment assignment
+FK without issuing DDL. Missing or partial schemas stop initialization with an
+explicit migration error. `create_all()` is never used to fill gaps in an existing
+schema; previous automatic column type adjustments are also no longer performed.
+
+Compose runs the dedicated `database-migrate` job after PostgreSQL is healthy.
+It applies the experiment migration before `database-init`, roll-up, and the API;
+a migration failure blocks those dependent services. The job bootstraps the full
+schema only when empty, under the migration transaction and advisory lock.
+`initialize.py` itself continues to verify existing schemas without migrating.
+
+The migration can also be run separately with database connection settings:
+
+```sh
+python -m src.database.migrations.add_experimentation_schema --apply
+python -m src.database.initialize --check
+```
+
+The standalone command requires the existing base tables. Compose adds the explicit
+`--bootstrap-if-empty` option for first-time setup. Back up first, run the migration,
+verify the schema, and then start updated services.
+
+The migration remains transactional and safe to rerun, with its advisory lock,
+timeouts, and FK validation. Existing recommendation records retain NULL assignment
+references. Table and index changes acquire locks; rehearse on an isolated copy and
+retain the additive schema when rolling back application code. Other schema changes
+require their own explicit migrations.
+
+PostgreSQL migration tests create a temporary local cluster. Set the local binary
+directory to run them; otherwise they are skipped:
+
+```sh
+M3_TEST_POSTGRES_BIN_DIR=/path/to/postgresql/bin \
+  python -m unittest src.database.tests.test_experiment_migration_postgres -v
+```
 
 ## Service Integration
 
@@ -193,3 +228,26 @@ The Flask API, profile worker, and Kafka consumer use the PostgreSQL interaction
 functions for profiles, jobs, recommendation serves, LLM usage, stream events, and
 raw course-request evidence. Kafka request rows are deduplicated by topic, partition,
 and offset so a replay after a failed commit does not duplicate evidence.
+
+## Experiment Persistence
+
+`experiments` stores control/treatment policies, versions, traffic allocation, and
+configuration. `experiment_assignments` records each user's variant, with a unique
+`(experiment_id, user_id)` pair. `experiment_reports` stores report windows,
+analysis versions, and JSON results.
+
+Their interaction modules expose `create`, `get`, and bounded `list_records`
+functions. Reports also support exact experiment-name search with cursor pagination,
+and assignments support lookup by their unique experiment/user pair:
+
+```python
+page = experiment_reports.search(experiment_name="licensing-cost")
+assignment = experiment_assignments.get_for_user(experiment_id=experiment_id, user_id="42")
+```
+
+The assignment UUID remains the primary key. Recommendation serves accept an
+optional `experiment_assignment_id`; the referenced assignment must belong to the
+served user.
+
+Experiments default to `draft` with zero traffic allocation. This phase provides
+storage only; recommendation routing and API responses remain unchanged.

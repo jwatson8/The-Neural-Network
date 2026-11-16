@@ -66,12 +66,14 @@ jobs:
       - run: curl --fail --max-time 0.6 http://127.0.0.1:8082/recommend/1
       - name: Daily job uses isolated PostgreSQL and retains model without fresh data
         run: |
+          daily_day=$(TZ=America/New_York date -d '3 days ago' +%F)
+          daily_report="artifacts/daily/$daily_day/report.json"
           before=$(sha256sum artifacts/model.joblib)
-          docker compose run --rm --no-deps --user "$(id -u):$(id -g)" daily-model-updater python -m src.model_updates.daily
+          docker compose run --rm --no-deps --user "$(id -u):$(id -g)" daily-model-updater python -m src.model_updates.daily --day "$daily_day"
           test "$before" = "$(sha256sum artifacts/model.joblib)"
-          python -c 'import glob,json; r=json.load(open(glob.glob("artifacts/daily/*/report.json")[0])); assert r["status"] == "insufficient_data"; assert not r["eligible_for_manual_promotion"]'
+          python -c 'import json,sys; r=json.load(open(sys.argv[1])); assert r["status"] == "insufficient_data"; assert not r["eligible_for_manual_promotion"]' "$daily_report"
           mkdir -p reports
-          cp artifacts/daily/*/report.json reports/daily-report.json
+          cp "$daily_report" reports/daily-report.json
       - name: Verify actual model swap and rollback in isolated containers
         run: |
           before=$(sha256sum artifacts/model.joblib)
