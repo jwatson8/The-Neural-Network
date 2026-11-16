@@ -478,3 +478,69 @@ class ExperimentMigrationPostgresTests(unittest.TestCase):
         self.assertEqual(reference_price(prices['zero']), Decimal(0))
         for movie_id in ('unknown', 'nan', 'negative'):
             self.assertIsNone(reference_price(prices[movie_id]))
+
+    def reporting_fixture(self):
+        from src.database.tests.test_experiment_reporting import seed_reporting_database
+        SQLModel.metadata.create_all(self.test_engine)
+        return seed_reporting_database(self.test_engine)
+
+    def test_reporting_postgres_read_only_snapshot_and_jsonb_revision(self):
+        from src.experimentation.reporting import generate_report
+        from src.experimentation.report_types import CoverageEvidence
+        statements = []
+        observer = lambda conn, cursor, statement, parameters, context, many: statements.append(statement)
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            args, _ = self.reporting_fixture()
+            event.listen(self.test_engine, 'before_cursor_execute', observer)
+            self.addCleanup(event.remove, self.test_engine, 'before_cursor_execute', observer)
+            first = generate_report(**args, persist=True, repetitions=100,
+                coverage=CoverageEvidence(args['window_end'], 'synthetic-only'))
+            second = generate_report(**args, persist=True, repetitions=100,
+                coverage=CoverageEvidence(args['window_end'], 'synthetic-only'))
+            self.assertEqual(first['status'], 'final')
+            self.assertEqual(first['report_id'], second['report_id'])
+            self.assertFalse(second['persistence_created'])
+            self.assertEqual(first['licensing_cost']['control']['total_known_recorded_cost'], '4.0000000000')
+            self.assertEqual(len(experiment_reports.list_records()), 1)
+        self.assertTrue(any('REPEATABLE READ READ ONLY' in query for query in statements))
+        self.assertFalse(any(query.lstrip().startswith(('CREATE ', 'ALTER ')) for query in statements))
+
+    def test_reporting_postgres_concurrent_retries_have_one_revision(self):
+        from src.experimentation.reporting import generate_report
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            args, _ = self.reporting_fixture()
+            barrier = Barrier(6)
+            def generate(_):
+                barrier.wait(timeout=10)
+                return generate_report(**args, persist=True, repetitions=100)
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                reports = list(pool.map(generate, range(6)))
+            self.assertEqual(len({report['report_id'] for report in reports}), 1)
+            self.assertEqual(sum(report['persistence_created'] for report in reports), 1)
+            self.assertEqual(len(experiment_reports.list_records()), 1)
+
+    def test_reporting_postgres_persistence_failure_rolls_back(self):
+        from src.experimentation.reporting import generate_report
+        from src.database.models import ExperimentReport
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            args, _ = self.reporting_fixture()
+            original = Session.get
+            def fail_read(session, entity, *positional, **keywords):
+                if entity is ExperimentReport:
+                    raise RuntimeError('synthetic persistence failure')
+                return original(session, entity, *positional, **keywords)
+            with patch.object(Session, 'get', fail_read), self.assertRaises(RuntimeError):
+                generate_report(**args, persist=True, repetitions=100)
+            self.assertEqual(experiment_reports.list_records(), [])
+
+    def test_reporting_postgres_unknown_numeric_amount_is_not_zero(self):
+        from src.experimentation.reporting import generate_report
+        from src.experimentation.report_types import CoverageEvidence
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            args, _ = self.reporting_fixture()
+            with self.test_engine.begin() as connection:
+                connection.exec_driver_sql("UPDATE licensing_costs SET license_cost='NaN'::numeric WHERE user_id='t1'")
+            report = generate_report(**args, coverage=CoverageEvidence(args['window_end'], 'synthetic-only'), repetitions=100)
+            self.assertEqual(report['licensing_cost']['treatment']['unknown_charge_records'], 1)
+            self.assertIsNone(report['licensing_cost']['treatment']['actual_cost_per_assigned_user'])
+            self.assertEqual(report['status'], 'provisional')

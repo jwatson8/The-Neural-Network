@@ -88,3 +88,11 @@ An opt-in [cost-aware Treatment](cost_aware_reranking.md) now covers all three
 existing scoring paths. Model hosting, live parameter/cohort approval and cold-start
 profile/version coordination remain team integration dependencies. Assignment is not proof
 of exposure or client delivery; see the service attribution contract.
+
+## Statistical Reports
+
+[Experiment reporting](reporting.md) provides assignment-based user-level cost,
+conditional rating and participation analyses, explicit JSONB persistence and a
+disabled-by-default one-shot worker. Actual ledger charges are separate from
+catalog ranking prices. Reports disclose missing ingestion evidence and do not
+claim live results from offline diagnostics.
