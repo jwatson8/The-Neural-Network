@@ -55,13 +55,21 @@ services:
       retries: 10
       start_period: 10s
 
+  database-migrate:
+    <<: *service
+    restart: "no"
+    command: [python, -m, src.database.migrations.add_experimentation_schema, --apply, --bootstrap-if-empty]
+    environment: *database-connection
+    depends_on:
+      database: {condition: service_healthy}
+
   database-init:
     <<: *service
     restart: "no"
     command: [python, -m, src.database.initialize]
     environment: *database-connection
     depends_on:
-      database: {condition: service_healthy}
+      database-migrate: {condition: service_completed_successfully}
 
   database-roll-up:
     <<: *service

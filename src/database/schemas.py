@@ -216,6 +216,7 @@ class CourseRequestCreate(DatabaseSchema):
 
 class RecommendationServeCreate(DatabaseSchema):
     request_id: UUID | None = None
+    experiment_assignment_id: UUID | None = None
     user_id: str = Field(min_length=1, max_length=255)
     served_at: datetime
     model_route: str = Field(min_length=1, max_length=100)
@@ -261,3 +262,90 @@ class ColdStartJobCreate(DatabaseSchema):
     next_attempt_at: datetime | None = None
     lease_until: datetime | None = None
     last_error: str | None = None
+
+
+class ExperimentCreate(DatabaseSchema):
+    experiment_id: UUID | None = None
+    name: str = Field(min_length=1, max_length=255)
+    status: Literal["draft", "running", "paused", "completed", "aborted"] = "draft"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    control_policy: str = Field(min_length=1, max_length=255)
+    control_version: str = Field(min_length=1, max_length=255)
+    treatment_policy: str = Field(min_length=1, max_length=255)
+    treatment_version: str = Field(min_length=1, max_length=255)
+    traffic_allocation: Decimal = Field(default=Decimal("0"), ge=0, le=1, max_digits=7, decimal_places=6)
+    treatment_allocation: Decimal = Field(default=Decimal("0.5"), ge=0, le=1, max_digits=7, decimal_places=6)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("name", "control_policy", "control_version", "treatment_policy", "treatment_version")
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def validate_times(self):
+        _normalize_experiment_times(self, ("created_at", "updated_at", "starts_at", "ends_at"))
+        if self.ends_at is not None and (self.starts_at is None or self.ends_at <= self.starts_at):
+            raise ValueError("ends_at requires starts_at and must be later")
+        if self.created_at is not None and self.updated_at is not None and self.updated_at < self.created_at:
+            raise ValueError("updated_at cannot precede created_at")
+        return self
+
+
+def _normalize_experiment_times(record, fields):
+    for name in fields:
+        value = getattr(record, name)
+        if value is not None:
+            if value.utcoffset() is None:
+                raise ValueError(f"{name} must include a timezone")
+            setattr(record, name, value.astimezone(UTC))
+
+
+class ExperimentAssignmentCreate(DatabaseSchema):
+    assignment_id: UUID | None = None
+    experiment_id: UUID
+    user_id: str = Field(min_length=1, max_length=255)
+    variant: Literal["control", "treatment"]
+    assigned_at: datetime | None = None
+
+    @field_validator("user_id")
+    @classmethod
+    def nonblank_user(cls, value):
+        if not value.strip():
+            raise ValueError("user_id must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def validate_time(self):
+        _normalize_experiment_times(self, ("assigned_at",))
+        return self
+
+
+class ExperimentReportCreate(DatabaseSchema):
+    report_id: UUID | None = None
+    experiment_id: UUID
+    generated_at: datetime | None = None
+    window_start: datetime
+    window_end: datetime
+    status: Literal["provisional", "final", "insufficient_data", "failed"] = "provisional"
+    results: dict[str, Any] = Field(default_factory=dict)
+    analysis_version: str = Field(min_length=1, max_length=255)
+
+    @field_validator("analysis_version")
+    @classmethod
+    def nonblank_version(cls, value):
+        if not value.strip():
+            raise ValueError("analysis_version must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def validate_times(self):
+        _normalize_experiment_times(self, ("generated_at", "window_start", "window_end"))
+        if self.window_end <= self.window_start:
+            raise ValueError("window_end must be later than window_start")
+        return self

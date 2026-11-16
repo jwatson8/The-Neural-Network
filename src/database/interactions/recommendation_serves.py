@@ -19,7 +19,7 @@ from src.database.interactions._shared import (
 from src.database.interactions._shared import (
     list_records as list_model_records,
 )
-from src.database.models import RecommendationServe
+from src.database.models import ExperimentAssignment, RecommendationServe
 from src.database.schemas import RecommendationItem, RecommendationServeCreate
 
 __all__ = ["create", "get", "list_records", "search"]
@@ -32,6 +32,10 @@ def _create(
     data: RecommendationServeCreate,
     request_started_at: float | None,
 ) -> RecommendationServe:
+    if data.experiment_assignment_id is not None:
+        assignment = session.get(ExperimentAssignment, data.experiment_assignment_id)
+        if assignment is None or assignment.user_id != data.user_id:
+            raise ValueError("experiment assignment must exist and belong to the served user")
     record = create_record(session, RecommendationServe, schema_values(data))
     if request_started_at is not None:
         record.serve_duration_ms = max(
@@ -98,6 +102,7 @@ def create(
     serve_duration_ms: float,
     request_id: UUID | None = None,
     request_started_at: float | None = None,
+    experiment_assignment_id: UUID | None = None,
 ) -> RecommendationServe:
     """Commit one served recommendation list in its original ranking order.
 
@@ -116,6 +121,7 @@ def create(
         request_received_at=request_received_at,
         serve_duration_ms=serve_duration_ms,
         request_id=request_id,
+        experiment_assignment_id=experiment_assignment_id,
     )
     return run(lambda session: _create(session, data, request_started_at))
 
