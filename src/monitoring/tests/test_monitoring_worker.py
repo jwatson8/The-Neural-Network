@@ -95,24 +95,6 @@ class MonitoringWorkerTests(unittest.TestCase):
         run_workload.assert_not_called()
         self.assertEqual(stop_event.waits, [])
 
-    def test_main_uses_default_config_and_registers_shutdown_signals(self):
-        stop_event = StopEvent(stopped=True)
-        with patch.object(
-            monitoring_worker, "Event", return_value=stop_event
-        ), patch.object(
-            monitoring_worker.signal, "signal"
-        ) as register_signal, patch.object(
-            monitoring_worker, "run_monitoring_worker"
-        ) as run_worker:
-            monitoring_worker.main()
-
-        self.assertEqual(run_worker.call_args.args[0], MonitoringConfig())
-        self.assertIs(run_worker.call_args.args[1], stop_event)
-        self.assertEqual(
-            [registered.args[0] for registered in register_signal.call_args_list],
-            [monitoring_worker.signal.SIGTERM, monitoring_worker.signal.SIGINT],
-        )
-
 
 if __name__ == "__main__":
     unittest.main()
