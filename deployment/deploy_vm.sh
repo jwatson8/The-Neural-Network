@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Invoked via SSH after CI has checked this exact main commit.
 set -euo pipefail
+deployment_complete=false
+# An early EOF while bash reads this script over SSH must not look successful.
+trap 'rc=$?; if [[ "$deployment_complete" != true && "$rc" == 0 ]]; then echo "Deployment ended before verification" >&2; exit 1; fi' EXIT
 sha=${1:?Supply the tested 40-character main commit SHA}
 live=${2:-true}
 [[ "$sha" =~ ^[a-f0-9]{40}$ ]] || { echo 'Invalid commit'; exit 1; }
@@ -30,15 +33,28 @@ if [[ "$live" == true ]]; then compose+=(--profile live); fi
 "${compose[@]}" config --quiet
 "${compose[@]}" build api
 if [[ "$live" == true ]]; then
-  "${compose[@]}" run --rm --no-deps cold-start-worker python -c '
+  "${compose[@]}" run --rm --no-deps -T --interactive=false cold-start-worker python -c '
 import os
 required = ("USER_LOOKUP_URL_TEMPLATE", "OPENAI_API_KEY")
 missing = [key for key in required if not os.getenv(key, "").strip()]
-assert not missing, "Missing live configuration: " + ", ".join(missing)'
-  "${compose[@]}" run --rm --no-deps kafka-tunnel \
-    bash /app/deployment/kafka_tunnel.sh --check
+assert not missing, "Missing live configuration: " + ", ".join(missing)' </dev/null
+  "${compose[@]}" run --rm --no-deps -T --interactive=false kafka-tunnel \
+    bash /app/deployment/kafka_tunnel.sh --check </dev/null
 fi
 "${compose[@]}" up -d --wait --wait-timeout 120
+# Verify the long-running services actually use the image just built.
+expected_image=$(docker image inspect "the-neural-network:$sha" --format '{{.Id}}')
+services=(api daily-model-updater)
+if [[ "$live" == true ]]; then services+=(cold-start-worker kafka-tunnel course-stream); fi
+for service in "${services[@]}"; do
+  container=$("${compose[@]}" ps -q "$service")
+  [[ -n "$container" ]] || { echo "Missing running service: $service" >&2; exit 1; }
+  actual=$(docker inspect --format '{{.Image}} {{.State.Running}}' "$container")
+  [[ "$actual" == "$expected_image true" ]] || {
+    echo "Service $service is not running the tested image" >&2; exit 1;
+  }
+  echo "Verified $service running tested image $sha"
+done
 "${compose[@]}" exec -T api python -c '
 import urllib.request
 with urllib.request.urlopen("http://127.0.0.1:8082/recommend/1", timeout=0.6) as r:
@@ -46,8 +62,9 @@ with urllib.request.urlopen("http://127.0.0.1:8082/recommend/1", timeout=0.6) as
     ids = body.split(",")
     assert r.status == 200 and 1 <= len(ids) <= 20
     assert all(ids) and len(set(ids)) == len(ids) and "\n" not in body
-print("Deployment recommendation check passed")'
+print("Deployment recommendation check passed")' </dev/null
 mkdir -p state
 printf '%s\n' "$sha" > state/deployed-commit.txt
 printf '%s\n' "$previous" > state/previous-commit.txt
+deployment_complete=true
 echo "Deployed $sha successfully. Existing model, .env and database volumes retained."
