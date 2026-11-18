@@ -32,7 +32,7 @@ if [[ "$live" == true ]]; then compose+=(--profile live); fi
 if [[ "$live" == true ]]; then
   "${compose[@]}" run --rm --no-deps cold-start-worker python -c '
 import os
-required = ("USER_LOOKUP_URL_TEMPLATE", "OPENAI_API_KEY")
+required = ("USER_LOOKUP_URL_TEMPLATE", "DEEPSEEK_API_KEY")
 missing = [key for key in required if not os.getenv(key, "").strip()]
 assert not missing, "Missing live configuration: " + ", ".join(missing)'
   "${compose[@]}" run --rm --no-deps kafka-tunnel \

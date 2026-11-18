@@ -43,6 +43,9 @@ def fetch_descriptions(user_id):
     template = os.environ["USER_LOOKUP_URL_TEMPLATE"]
     url = template.format(user_id=quote(user_id, safe=""))
     headers = {"Accept": "application/json"}
+    bearer_token = os.getenv("USER_API_BEARER_TOKEN")
+    if bearer_token:
+        headers["Authorization"] = "Bearer " + bearer_token
     request = Request(url, headers=headers)
     try:
         with urlopen(request, timeout=3) as response:

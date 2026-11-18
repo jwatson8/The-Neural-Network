@@ -58,10 +58,11 @@ movie-preference profiles from user feedback. It supports both OpenAI and DeepSe
 
 To use DeepSeek R1 from the Spark machine over Tailscale Funnel:
 
-1. Copy `.env.deepseek.example` to `.env` and fill in:
+1. Copy `.env.example` to `.env` and fill in:
    - `DEEPSEEK_API_KEY` (from `~/.config/powerdiff-funnel.env` on Spark)
    - `USER_LOOKUP_URL_TEMPLATE` (your user preference API endpoint)
-   - Other optional settings as needed
+   - `USER_API_BEARER_TOKEN` if the user API requires bearer authentication
+   - `DEEPSEEK_MODEL` if using a model other than `deepseek-r1:1.5b`
 
 2. Verify connectivity:
    ```bash
