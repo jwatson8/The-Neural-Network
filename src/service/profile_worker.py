@@ -125,8 +125,8 @@ def process_one(store, client, model_name):
                 provider="deepseek",
                 model_name=model_name,
                 status="succeeded",
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
+                input_tokens=input_tokens if input_tokens is not None else 0,
+                output_tokens=output_tokens if output_tokens is not None else 0,
                 estimated_cost_usd=estimated_cost_usd,
             )
             llm_request_id = usage_record.request_id
