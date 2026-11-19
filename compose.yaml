@@ -176,9 +176,8 @@ services:
       USER_DISLIKES_FIELD: ${USER_DISLIKES_FIELD:-self_description_dislikes}
       USER_LOOKUP_TIMEOUT_SECONDS: "3"
       USER_API_BEARER_TOKEN: ${USER_API_BEARER_TOKEN:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
-      OPENAI_TIMEOUT_SECONDS: "20"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-r1:1.5b}
     depends_on:
       api: {condition: service_healthy}
 

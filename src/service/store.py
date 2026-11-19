@@ -34,7 +34,7 @@ class ProfileStore:
         users.create_missing_many([{"user_id": user_id}])
         return cold_start_jobs.enqueue(user_id=user_id)
 
-    def claim_next(self, lease_seconds=60):
+    def claim_next(self, lease_seconds=360):
         job = cold_start_jobs.claim(lease_seconds=lease_seconds)
         if job is None:
             return None
