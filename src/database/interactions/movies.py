@@ -20,7 +20,10 @@ from src.database.interactions._shared import (
 from src.database.models import Movie
 from src.database.schemas import MovieCreate, MovieUpdate
 
-__all__ = ["create", "get", "update", "list_records", "create_missing_many"]
+__all__ = [
+    "create", "get", "update", "list_records", "create_missing_many",
+    "get_existing_ids",
+]
 
 ### ----------- Helper Functions -----------
 
@@ -49,6 +52,13 @@ def _list(session: Session, *, offset: int, limit: int) -> list[Movie]:
 
 def _create_missing_many(session: Session, records: list[MovieCreate]) -> list[str]:
     return create_missing_records(session, Movie, records, "movie_id")
+
+
+def _get_existing_ids(session: Session, movie_ids: set[str]) -> set[str]:
+    if not movie_ids:
+        return set()
+    statement = select(Movie.movie_id).where(Movie.movie_id.in_(movie_ids))
+    return set(session.exec(statement).all())
 
 
 ### ----------- Individual Functions -----------
@@ -156,3 +166,11 @@ def create_missing_many(
     """Insert absent movies atomically and return IDs left unchanged."""
     validated = [MovieCreate.model_validate(record) for record in records]
     return run(lambda session: _create_missing_many(session, validated))
+
+
+def get_existing_ids(movie_ids: Iterable[str]) -> set[str]:
+    """Return exact supplied catalog identifiers that currently exist."""
+    normalized = {movie_id for movie_id in movie_ids if isinstance(movie_id, str)}
+    if not normalized:
+        return set()
+    return run(lambda session: _get_existing_ids(session, normalized))

@@ -154,6 +154,8 @@ def create_app(model=None, profile_store=None, config=None):
         if loaded_model is None:
             return jsonify(error='Service Unavailable', message='Model unavailable'), 503
 
+        users.create_missing_many([{'user_id': user_id}])
+
         history_rows = user_movie_history.get_user_history(user_id)
         excluded_movie_ids = {row.movie_id for row in history_rows}
         excluded_movie_ids.update(
@@ -195,7 +197,6 @@ def create_app(model=None, profile_store=None, config=None):
             return jsonify(error='Internal Server Error', message='Recommendation generation failed'), 500
         movie_ids = [item.movie_id for item in response_items]
 
-        users.create_missing_many([{'user_id': user_id}])
         recommendation_serves.create(
             user_id=user_id,
             served_at=datetime.now(UTC),

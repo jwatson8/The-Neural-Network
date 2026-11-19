@@ -33,9 +33,9 @@ __all__ = ["create", "get", "list_records", "create_many", "search"]
 def _lock_watch_users(
     session: Session, events: Iterable[StreamEvent | StreamEventCreate]
 ) -> None:
-    user_ids = sorted(
-        {event.user_id for event in events if event.event_type == "watch"}
-    )
+    # Serialize every history projection for a user so the batch can safely
+    # calculate one final row per user/movie pair before a bulk upsert.
+    user_ids = sorted({event.user_id for event in events})
     if not user_ids:
         return
     statement = (
@@ -147,17 +147,18 @@ def _create_many(session: Session, records: list[StreamEventCreate]) -> int:
     session.flush()
     materialized_ids = set()
     inserted_events = []
-    for event in values:
+    for input_order, event in enumerate(values):
         event_id = event["event_id"]
         if event_id in inserted_ids and event_id not in materialized_ids:
-            inserted_events.append(StreamEvent.model_construct(**event))
+            inserted_events.append((input_order, StreamEvent.model_construct(**event)))
             materialized_ids.add(event_id)
     inserted_events = sorted(
         inserted_events,
-        key=lambda record: (record.event_time, record.event_id.int),
+        key=lambda item: (item[1].event_time, item[0]),
     )
-    for event in inserted_events:
-        _materialize_event(session, event)
+    from src.database.interactions._stream_event_batch import materialize_many
+
+    materialize_many(session, [event for _, event in inserted_events])
     return len(inserted_ids)
 
 

@@ -11,10 +11,11 @@ from src.database.interactions import (
     cold_start_profiles,
     course_requests,
     movies,
+    stream_events,
     users,
 )
-from src.database.schemas import StreamEventCreate
-from src.data_quality.ingestion import persist_stream_event
+from src.database.schemas import CourseRequestCreate, StreamEventCreate
+from src.data_quality.ingestion import persist_stream_event, validate_stream_events
 from src.data_quality.quality_logging import LogContext, log_validation_failure
 
 
@@ -31,7 +32,6 @@ class ProfileStore:
         return {"positive": profile.positive, "negative": profile.negative}
 
     def enqueue(self, user_id):
-        users.create_missing_many([{"user_id": user_id}])
         return cold_start_jobs.enqueue(user_id=user_id)
 
     def claim_next(self, lease_seconds=360):
@@ -90,7 +90,6 @@ class ProfileStore:
             )
             log_validation_failure("kafka", errors, context=context)
             return None, errors
-        user_id = validated_event.user_id
         movie_id = validated_event.movie_id
         if movies.get(movie_id) is None:
             errors = [{
@@ -100,14 +99,7 @@ class ProfileStore:
             }]
             log_validation_failure("kafka", errors, context=context)
             return None, errors
-        try:
-            users.create_missing_many([{"user_id": user_id}])
-        except ValidationError as error:
-            errors = error.errors(
-                include_url=False, include_context=False, include_input=False
-            )
-            log_validation_failure("kafka", errors, context=context)
-            return None, errors
+        users.create_missing_many([{"user_id": validated_event.user_id}])
         return persist_stream_event(validated_event.model_dump(), context=context)
 
     def record_course_request(self, topic, partition_id, offset_id, line):
@@ -117,6 +109,85 @@ class ProfileStore:
             offset_id=offset_id,
             raw_line=line,
         )
+
+    def record_batch(self, stream_records, request_records):
+        """Persist one decoded Kafka poll using bounded bulk operations."""
+        counts = {"account": 0, "watch": 0, "rating": 0, "recommendation": 0}
+        errors = []
+        rejected_count = 0
+        valid_events, validation_failures = validate_stream_events(
+            record["event"] for record in stream_records
+        )
+        for failure in validation_failures:
+            errors.extend(failure)
+        rejected_count += len(validation_failures)
+        kind_by_event_type = {
+            "account_created": "account", "watch": "watch", "rating": "rating",
+        }
+        validated_stream = [
+            (kind_by_event_type[event.event_type], event) for event in valid_events
+        ]
+
+        account_user_ids = {
+            event.user_id
+            for kind, event in validated_stream
+            if kind == "account"
+        }
+        movie_ids = {
+            event.movie_id
+            for kind, event in validated_stream
+            if kind in ("watch", "rating") and event.movie_id is not None
+        }
+        known_movies = movies.get_existing_ids(movie_ids)
+        accepted_events = []
+        for kind, event in validated_stream:
+            if kind in ("watch", "rating") and event.movie_id not in known_movies:
+                errors.append({
+                    "loc": ("movie_id",),
+                    "type": "value_error",
+                    "msg": "Unknown movie identifier",
+                })
+                rejected_count += 1
+                continue
+            accepted_events.append(event)
+            counts[kind] += 1
+
+        observed_user_ids = {event.user_id for event in accepted_events}
+        if observed_user_ids:
+            users.create_missing_many(
+                [{"user_id": user_id} for user_id in sorted(observed_user_ids)]
+            )
+
+        inserted = stream_events.create_many(accepted_events)
+
+        valid_requests = []
+        for record in request_records:
+            try:
+                valid_requests.append(CourseRequestCreate.model_validate(record))
+            except ValidationError as error:
+                errors.extend(error.errors(
+                    include_url=False, include_context=False, include_input=False
+                ))
+                rejected_count += 1
+        course_requests.create_many(valid_requests)
+        counts["recommendation"] = len(valid_requests)
+
+        if account_user_ids:
+            existing_profiles = cold_start_profiles.get_existing_user_ids(
+                account_user_ids
+            )
+            cold_start_jobs.enqueue_many(
+                {"user_id": user_id}
+                for user_id in sorted(account_user_ids - existing_profiles)
+            )
+
+        return {
+            "counts": counts,
+            "inserted": inserted,
+            "duplicates": max(0, len(accepted_events) - inserted),
+            "errors": errors,
+            "rejected_count": rejected_count,
+        }
 
     def seed_profiles(self, path):
         seed_path = Path(path)

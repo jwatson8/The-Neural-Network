@@ -42,11 +42,21 @@ recommendation requests are captured separately as course-request evidence.
 Watch and rating events use the course stream formats
 `time,user_id,GET /data/m/<movie_id>/<minute>.mpg` and
 `time,user_id,GET /rate/<movie_id>=<rating>`.
-The referenced movie must already exist in the catalog. Each record is keyed by
+Movie IDs are opaque catalog keys: the consumer percent-decodes the path segment
+but does not convert plus signs, punctuation, or titles. The referenced movie must
+already exist. Every observed stream user receives an idempotent minimal local
+row because the unkeyed Kafka topic cannot guarantee cross-partition account order;
+only explicit account events and API activity enqueue profile generation.
+Kafka user IDs must contain ASCII digits only; malformed identifiers are rejected
+before user or event persistence.
+Each record is keyed by
 its Kafka topic, partition, and offset for replay-safe persistence; accepted watch
 and rating events update `user_movie_history`, and watches also create licensing
 charges.
-Validation failures are logged without raw input. Database errors escape before
+Each Kafka poll is validated and persisted through bulk user/movie lookups, stream
+insertion, history projection, licensing, course-request capture, and account-job
+enqueueing. Validation failures are aggregated into the existing data-quality log
+without raw input. Database errors escape before
 the consumer commits the polled batch, allowing Kafka redelivery after restart;
 there is no in-process retry/backoff loop for these errors. User API and LLM calls
 run only in the worker. The worker validates preference fields and structured LLM
@@ -54,6 +64,11 @@ output, persists results, and retries failures. The live User API mapping still
 depends on confirming its identity/field contract. No service activation is implied
 until real connections and credentials are configured. Empty descriptions
 deliberately use popularity.
+
+`KAFKA_MAX_POLL_RECORDS` defaults to 200. Every
+`KAFKA_METRICS_INTERVAL_SECONDS` (default 30), `course_stream_metrics` logs report
+records processed per second, total lag, and maximum single-partition lag. Batch
+logs include inserted/duplicate counts, validation outcomes, and processing time.
 
 Alvajoy's Flask application factory and route split are retained. The request path
 does not reload the movie catalog or transform every movie on each cold request.
