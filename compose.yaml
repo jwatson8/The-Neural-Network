@@ -146,6 +146,12 @@ services:
       <<: *database-connection
       MODEL_PATH: /inputs/model.joblib
       MODEL_VERSION: ${MODEL_VERSION:-m0-svd-v1}
+      MODEL_ACTIVATION_ENABLED: "true"
+      EXPERIMENTS_ENABLED: ${EXPERIMENTS_ENABLED:-false}
+      EXPERIMENT_ID: ${EXPERIMENT_ID:-}
+      COST_AWARE_TREATMENT_ENABLED: ${COST_AWARE_TREATMENT_ENABLED:-false}
+      CONTROL_MODEL_VERSION: ${CONTROL_MODEL_VERSION:-}
+      TREATMENT_MODEL_VERSION: ${TREATMENT_MODEL_VERSION:-}
       PROFILE_SEED_PATH: /app/src/model/llm_profiles.json
       OPENBLAS_NUM_THREADS: "1"
       OMP_NUM_THREADS: "1"
@@ -176,9 +182,8 @@ services:
       USER_DISLIKES_FIELD: ${USER_DISLIKES_FIELD:-self_description_dislikes}
       USER_LOOKUP_TIMEOUT_SECONDS: "3"
       USER_API_BEARER_TOKEN: ${USER_API_BEARER_TOKEN:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
-      OPENAI_TIMEOUT_SECONDS: "20"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-r1:1.5b}
     depends_on:
       api: {condition: service_healthy}
 

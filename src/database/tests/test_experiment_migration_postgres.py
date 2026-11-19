@@ -5,6 +5,8 @@ No existing database URLs, services, Docker contexts or production resources are
 """
 
 import os
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Event
 from pathlib import Path
 import subprocess
 import tempfile
@@ -15,13 +17,14 @@ from uuid import uuid4
 
 from sqlalchemy import URL, event, inspect, text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
-from sqlmodel import SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
-from src.database.interactions import experiments, experiment_assignments, experiment_reports, recommendation_serves
+from src.database.interactions import experiments, experiment_assignments, experiment_reports, recommendation_serves, users
 from src.database.initialize import create_tables, verify_schema
 from src.database.migrations.add_experimentation_schema import migrate
-from src.database.models import User
-from src.database.schemas import ExperimentCreate, ExperimentAssignmentCreate, ExperimentReportCreate
+from src.database.models import User, Experiment
+from src.database.schemas import ExperimentCreate, ExperimentAssignmentCreate, ExperimentReportCreate, ExperimentLifecycleUpdate
+from src.experimentation.manager import DecisionReason, ExperimentManager
 
 BIN_DIR = os.getenv("M3_TEST_POSTGRES_BIN_DIR")
 
@@ -216,6 +219,122 @@ class ExperimentMigrationPostgresTests(unittest.TestCase):
         verify_schema(self.test_engine)
 
 
+    def assignment_experiment(self):
+        SQLModel.metadata.create_all(self.test_engine)
+        return experiments.create(ExperimentCreate(
+            name="concurrent-assignment", status="running", starts_at=self.now,
+            created_at=self.now, updated_at=self.now, traffic_allocation="1",
+            control_policy="baseline", control_version="v1",
+            treatment_policy="cost-rerank", treatment_version="v2",
+        ))
+
+    def test_concurrent_get_or_create_returns_one_unchanged_winner(self):
+        with patch("src.database.database.get_engine", return_value=self.test_engine):
+            experiment = self.assignment_experiment()
+            users.create(user_id="concurrent-user")
+            barrier = Barrier(8)
+
+            def assign(index):
+                barrier.wait(timeout=10)
+                return experiment_assignments.get_or_create(ExperimentAssignmentCreate(
+                    experiment_id=experiment.experiment_id, user_id="concurrent-user",
+                    variant="control" if index % 2 else "treatment",
+                    assigned_at=self.now + timedelta(seconds=index),
+                ))
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(pool.map(assign, range(8)))
+            self.assertEqual(sum(created for _, created in results), 1)
+            self.assertEqual(len({record.assignment_id for record, _ in results}), 1)
+            self.assertEqual(len({(record.variant, record.assigned_at) for record, _ in results}), 1)
+            self.assertEqual(len(experiment_assignments.list_records()), 1)
+
+    def test_concurrent_manager_decisions_persist_one_assignment(self):
+        with patch("src.database.database.get_engine", return_value=self.test_engine):
+            experiment = self.assignment_experiment()
+            users.create(user_id="concurrent-user")
+            barrier = Barrier(8)
+
+            def decide(_):
+                barrier.wait(timeout=10)
+                return ExperimentManager(enabled=True).decide(experiment_id=experiment.experiment_id,
+                    user_id="concurrent-user", eligible=True, now=self.now)
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                decisions = list(pool.map(decide, range(8)))
+            self.assertTrue(all(decision.assigned for decision in decisions))
+            self.assertEqual(sum(decision.newly_assigned for decision in decisions), 1)
+            self.assertEqual(len({decision.assignment_id for decision in decisions}), 1)
+            self.assertEqual(len({decision.variant for decision in decisions}), 1)
+            self.assertEqual(len(experiment_assignments.list_records()), 1)
+
+    def test_lifecycle_row_lock_blocks_decision_until_pause_commits(self):
+        with patch("src.database.database.get_engine", return_value=self.test_engine):
+            experiment = self.assignment_experiment()
+            users.create(user_id="waiting-user")
+            read_attempted = Event()
+
+            def observe_read(conn, cursor, statement, parameters, context, many):
+                if "FROM experiments" in statement and "FOR SHARE" in statement:
+                    read_attempted.set()
+
+            event.listen(self.test_engine, "before_cursor_execute", observe_read)
+            self.addCleanup(event.remove, self.test_engine, "before_cursor_execute", observe_read)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                with Session(self.test_engine) as session:
+                    locked = session.exec(select(Experiment).where(
+                        Experiment.experiment_id == experiment.experiment_id
+                    ).with_for_update()).one()
+                    future = pool.submit(ExperimentManager(enabled=True).decide,
+                        experiment_id=experiment.experiment_id, user_id="waiting-user",
+                        eligible=True, now=self.now)
+                    self.assertTrue(read_attempted.wait(timeout=10))
+                    self.assertFalse(future.done())
+                    locked.status = "paused"
+                    session.add(locked)
+                    session.commit()
+                decision = future.result(timeout=10)
+            self.assertEqual(decision.reason, DecisionReason.INACTIVE)
+            self.assertEqual(experiment_assignments.list_records(), [])
+
+    def test_decision_shared_lock_holds_until_assignment_commits(self):
+        with patch("src.database.database.get_engine", return_value=self.test_engine):
+            experiment = self.assignment_experiment()
+            users.create(user_id="assigning-user")
+            insert_started, release_insert, transition_attempted = Event(), Event(), Event()
+            original = experiment_assignments._get_or_create
+
+            def held_insert(session, data):
+                result = original(session, data)
+                insert_started.set()
+                if not release_insert.wait(timeout=10):
+                    raise RuntimeError("test did not release assignment transaction")
+                return result
+
+            def observe_transition(conn, cursor, statement, parameters, context, many):
+                if "FROM experiments" in statement and "FOR UPDATE" in statement:
+                    transition_attempted.set()
+
+            event.listen(self.test_engine, "before_cursor_execute", observe_transition)
+            self.addCleanup(event.remove, self.test_engine, "before_cursor_execute", observe_transition)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                with patch("src.database.interactions.experiment_assignments._get_or_create", side_effect=held_insert):
+                    deciding = pool.submit(ExperimentManager(enabled=True).decide,
+                        experiment_id=experiment.experiment_id, user_id="assigning-user",
+                        eligible=True, now=self.now)
+                    try:
+                        self.assertTrue(insert_started.wait(timeout=10))
+                        pausing = pool.submit(experiments.transition, ExperimentLifecycleUpdate(
+                            experiment_id=experiment.experiment_id, status="paused", occurred_at=self.now))
+                        self.assertTrue(transition_attempted.wait(timeout=10))
+                        self.assertFalse(pausing.done())
+                    finally:
+                        release_insert.set()
+                    self.assertTrue(deciding.result(timeout=10).assigned)
+                    self.assertEqual(pausing.result(timeout=10).status, "paused")
+            self.assertEqual(len(experiment_assignments.list_records()), 1)
+            self.assertEqual(ExperimentManager(enabled=True).decide(experiment_id=experiment.experiment_id,
+                user_id="assigning-user", eligible=True, now=self.now).reason, DecisionReason.INACTIVE)
     def test_compose_migration_bootstraps_empty_schema_under_lock_and_repeats(self):
         statements = []
         observer = lambda conn, cursor, statement, parameters, context, many: statements.append(statement)
@@ -252,3 +371,176 @@ class ExperimentMigrationPostgresTests(unittest.TestCase):
                 migrate(self.test_engine, bootstrap_if_empty=True)
         create_all.assert_not_called()
         self.assertEqual(inspect(self.test_engine).get_table_names(), ["users"])
+
+    def test_flask_treatment_exposure_persists_actual_metadata_and_assignment(self):
+        from unittest.mock import Mock
+        from src.service.api import create_app
+        from src.service.experiment_routing import ServingResult
+        from src.service.store import ProfileStore
+        from src.tests.test_service import make_model
+
+        SQLModel.metadata.create_all(self.test_engine)
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            experiment = experiments.create(ExperimentCreate(
+                name='http-exposure', status='running', starts_at=self.now,
+                traffic_allocation='1', treatment_allocation='1',
+                control_policy='legacy', control_version='baseline-v1',
+                treatment_policy='stub-treatment', treatment_version='treatment-v1'))
+            provider = Mock(return_value=ServingResult(('movie-1', 'movie-2'), 'treatment-v1',
+                                                       'stub_route', 'stub-treatment', fulfilled=True))
+            app = create_app(model=make_model(), profile_store=ProfileStore(),
+                config={'TESTING': True, 'MODEL_VERSION': 'baseline-v1', 'EXPERIMENTS_ENABLED': True,
+                        'EXPERIMENT_ID': str(experiment.experiment_id)}, treatment_server=provider)
+            response = app.test_client().get('/recommend/http-user')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_data(as_text=True), 'movie-1,movie-2')
+            records = recommendation_serves.list_records()
+            self.assertEqual(len(records), 1)
+            assignment = experiment_assignments.get_for_user(experiment_id=experiment.experiment_id, user_id='http-user')
+            self.assertEqual(records[0].experiment_assignment_id, assignment.assignment_id)
+            self.assertEqual((records[0].model_version, records[0].model_route), ('treatment-v1', 'stub_route'))
+            provider.assert_called_once()
+
+    def test_flask_unsupported_treatment_preserves_assignment_without_exposure(self):
+        from src.service.api import create_app
+        from src.service.store import ProfileStore
+        from src.tests.test_service import make_model
+
+        SQLModel.metadata.create_all(self.test_engine)
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            experiment = experiments.create(ExperimentCreate(
+                name='http-fallback', status='running', starts_at=self.now,
+                traffic_allocation='1', treatment_allocation='1',
+                control_policy='legacy', control_version='baseline-v1',
+                treatment_policy='unavailable', treatment_version='not-hosted'))
+            app = create_app(model=make_model(), profile_store=ProfileStore(),
+                config={'TESTING': True, 'MODEL_VERSION': 'baseline-v1', 'EXPERIMENTS_ENABLED': True,
+                        'EXPERIMENT_ID': str(experiment.experiment_id)})
+            response = app.test_client().get('/recommend/http-user')
+            self.assertEqual(response.status_code, 200)
+            records = recommendation_serves.list_records()
+            self.assertEqual(len(records), 1)
+            self.assertIsNone(records[0].experiment_assignment_id)
+            self.assertEqual(records[0].model_version, 'baseline-v1')
+            self.assertEqual(records[0].model_route, 'popularity_fallback')
+            self.assertEqual(experiment_assignments.get_for_user(
+                experiment_id=experiment.experiment_id, user_id='http-user').variant, 'treatment')
+
+    def test_cost_aware_flask_treatment_uses_batch_prices_and_actual_model_pin(self):
+        from src.database.interactions import movies
+        from src.experimentation.cost_reranking import POLICY, CostAwareConfig, treatment_version
+        from src.service.api import create_app
+        from src.service.store import ProfileStore
+        from src.tests.test_service import make_model
+
+        SQLModel.metadata.create_all(self.test_engine)
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            model = make_model()
+            movies.create_missing_many([dict(movie_id=movie['movie_id'], title=movie['movie_id'],
+                license_cost='.1' if index % 3 else '10') for index, movie in enumerate(model['movies'])])
+            experiment = experiments.create(ExperimentCreate(
+                name='postgres-cost-aware', status='running', starts_at=self.now,
+                traffic_allocation='1', treatment_allocation='1',
+                control_policy='legacy', control_version='pg-model-v1', treatment_policy=POLICY,
+                treatment_version=treatment_version('pg-model-v1', CostAwareConfig())))
+            price_queries = []
+            observer = lambda conn, cursor, statement, parameters, context, many: price_queries.append(statement) if 'FROM movies' in statement else None
+            event.listen(self.test_engine, 'before_cursor_execute', observer)
+            self.addCleanup(event.remove, self.test_engine, 'before_cursor_execute', observer)
+            app = create_app(model=model, profile_store=ProfileStore(), config={
+                'TESTING': True, 'MODEL_VERSION': 'pg-model-v1', 'EXPERIMENTS_ENABLED': True,
+                'EXPERIMENT_ID': str(experiment.experiment_id), 'COST_AWARE_TREATMENT_ENABLED': True})
+            response = app.test_client().get('/recommend/pg-user')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.mimetype, 'text/plain')
+            self.assertEqual(len(response.get_data(as_text=True).split(',')), 20)
+            records = recommendation_serves.list_records()
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0].model_route, 'cost_aware:popularity_fallback')
+            self.assertEqual(records[0].model_version, 'pg-model-v1')
+            assignment = experiment_assignments.get_for_user(experiment_id=experiment.experiment_id, user_id='pg-user')
+            self.assertEqual(records[0].experiment_assignment_id, assignment.assignment_id)
+            self.assertEqual(len(price_queries), 1)
+
+    def test_catalog_price_batch_handles_postgres_null_zero_nan_and_negative(self):
+        from decimal import Decimal
+        from src.database.interactions import movies
+        from src.experimentation.cost_reranking import reference_price
+
+        SQLModel.metadata.create_all(self.test_engine)
+        with self.test_engine.begin() as connection:
+            connection.exec_driver_sql("""INSERT INTO movies(movie_id, title, license_cost)
+                VALUES ('zero', 'Zero', 0), ('unknown', 'Unknown', NULL),
+                       ('nan', 'Invalid', 'NaN'::numeric), ('negative', 'Invalid', -1)""")
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            prices = movies.get_license_costs(['zero', 'unknown', 'nan', 'negative', 'absent'])
+        self.assertNotIn('absent', prices)
+        self.assertEqual(reference_price(prices['zero']), Decimal(0))
+        for movie_id in ('unknown', 'nan', 'negative'):
+            self.assertIsNone(reference_price(prices[movie_id]))
+
+    def reporting_fixture(self):
+        from src.database.tests.test_experiment_reporting import seed_reporting_database
+        SQLModel.metadata.create_all(self.test_engine)
+        return seed_reporting_database(self.test_engine)
+
+    def test_reporting_postgres_read_only_snapshot_and_jsonb_revision(self):
+        from src.experimentation.reporting import generate_report
+        from src.experimentation.report_types import CoverageEvidence
+        statements = []
+        observer = lambda conn, cursor, statement, parameters, context, many: statements.append(statement)
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            args, _ = self.reporting_fixture()
+            event.listen(self.test_engine, 'before_cursor_execute', observer)
+            self.addCleanup(event.remove, self.test_engine, 'before_cursor_execute', observer)
+            first = generate_report(**args, persist=True, repetitions=100,
+                coverage=CoverageEvidence(args['window_end'], 'synthetic-only'))
+            second = generate_report(**args, persist=True, repetitions=100,
+                coverage=CoverageEvidence(args['window_end'], 'synthetic-only'))
+            self.assertEqual(first['status'], 'final')
+            self.assertEqual(first['report_id'], second['report_id'])
+            self.assertFalse(second['persistence_created'])
+            self.assertEqual(first['licensing_cost']['control']['total_known_recorded_cost'], '4.0000000000')
+            self.assertEqual(len(experiment_reports.list_records()), 1)
+        self.assertTrue(any('REPEATABLE READ READ ONLY' in query for query in statements))
+        self.assertFalse(any(query.lstrip().startswith(('CREATE ', 'ALTER ')) for query in statements))
+
+    def test_reporting_postgres_concurrent_retries_have_one_revision(self):
+        from src.experimentation.reporting import generate_report
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            args, _ = self.reporting_fixture()
+            barrier = Barrier(6)
+            def generate(_):
+                barrier.wait(timeout=10)
+                return generate_report(**args, persist=True, repetitions=100)
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                reports = list(pool.map(generate, range(6)))
+            self.assertEqual(len({report['report_id'] for report in reports}), 1)
+            self.assertEqual(sum(report['persistence_created'] for report in reports), 1)
+            self.assertEqual(len(experiment_reports.list_records()), 1)
+
+    def test_reporting_postgres_persistence_failure_rolls_back(self):
+        from src.experimentation.reporting import generate_report
+        from src.database.models import ExperimentReport
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            args, _ = self.reporting_fixture()
+            original = Session.get
+            def fail_read(session, entity, *positional, **keywords):
+                if entity is ExperimentReport:
+                    raise RuntimeError('synthetic persistence failure')
+                return original(session, entity, *positional, **keywords)
+            with patch.object(Session, 'get', fail_read), self.assertRaises(RuntimeError):
+                generate_report(**args, persist=True, repetitions=100)
+            self.assertEqual(experiment_reports.list_records(), [])
+
+    def test_reporting_postgres_unknown_numeric_amount_is_not_zero(self):
+        from src.experimentation.reporting import generate_report
+        from src.experimentation.report_types import CoverageEvidence
+        with patch('src.database.database.get_engine', return_value=self.test_engine):
+            args, _ = self.reporting_fixture()
+            with self.test_engine.begin() as connection:
+                connection.exec_driver_sql("UPDATE licensing_costs SET license_cost='NaN'::numeric WHERE user_id='t1'")
+            report = generate_report(**args, coverage=CoverageEvidence(args['window_end'], 'synthetic-only'), repetitions=100)
+            self.assertEqual(report['licensing_cost']['treatment']['unknown_charge_records'], 1)
+            self.assertIsNone(report['licensing_cost']['treatment']['actual_cost_per_assigned_user'])
+            self.assertEqual(report['status'], 'provisional')

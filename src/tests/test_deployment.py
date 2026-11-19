@@ -38,6 +38,14 @@ esac
 printf '%s\\n' "$*" >> "$DEPLOY_DIRECTORY/commands"
 if [[ "${FAIL_START:-}" == yes && "$*" == *"up -d"* ]]; then exit 1; fi
 if [[ "${FAIL_CONFIG:-}" == yes && "$*" == *"run --rm --no-deps"* ]]; then exit 1; fi
+if [[ "$*" == *"run --rm --no-deps"* && "$*" != *"--interactive=false"* ]]; then cat >/dev/null; fi
+if [[ "$*" == "image inspect "* ]]; then echo sha256:test; fi
+if [[ "$*" == *" ps -q "* ]]; then echo "container-${@: -1}"; fi
+if [[ "$1" == inspect ]]; then
+  if [[ "${STALE_STREAM:-}" == yes && "${@: -1}" == container-course-stream ]]; then
+    echo 'sha256:old true'
+  else echo 'sha256:test true'; fi
+fi
 ''')
         git.chmod(0o755)
         docker.chmod(0o755)
@@ -55,7 +63,7 @@ if [[ "${FAIL_CONFIG:-}" == yes && "$*" == *"run --rm --no-deps"* ]]; then exit 
         self.assertIn('checkout --detach ' + SHA, commands)
         self.assertIn('--profile live up -d --wait', commands)
         self.assertIn(
-            'run --rm --no-deps kafka-tunnel bash '
+            'run --rm --no-deps -T --interactive=false kafka-tunnel bash '
             '/app/deployment/kafka_tunnel.sh --check',
             commands,
         )
@@ -63,6 +71,29 @@ if [[ "${FAIL_CONFIG:-}" == yes && "$*" == *"run --rm --no-deps"* ]]; then exit 
         self.assertEqual((self.root / 'state/deployed-commit.txt').read_text().strip(), SHA)
         self.assertEqual((self.root / '.env').read_text(), 'fixture')
         self.assertEqual((self.root / 'artifacts/model.joblib').read_text(), 'fixture')
+
+    def test_script_streamed_over_stdin_reaches_verification(self):
+        result = subprocess.run(['bash', '-s', '--', SHA, 'true'],
+                                input=SCRIPT.read_text(), env=self.env,
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Verified course-stream running tested image', result.stdout)
+        self.assertIn('Deployed ' + SHA + ' successfully', result.stdout)
+        self.assertEqual((self.root / 'state/deployed-commit.txt').read_text().strip(), SHA)
+
+    def test_early_eof_cannot_report_success(self):
+        partial = SCRIPT.read_text().split('sha=${1:?', 1)[0]
+        result = subprocess.run(['bash', '-s'], input=partial, env=self.env,
+                                capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Deployment ended before verification', result.stderr)
+
+    def test_old_consumer_image_cannot_report_success(self):
+        self.env['STALE_STREAM'] = 'yes'
+        result = self.run_deploy()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('course-stream is not running the tested image', result.stderr)
+        self.assertFalse((self.root / 'state/deployed-commit.txt').exists())
 
     def test_stale_commit_and_dirty_checkout_do_not_deploy(self):
         for change in ({'FAKE_MAIN': 'c'*40}, {'FAKE_DIRTY': ' M src/service/api.py'}):

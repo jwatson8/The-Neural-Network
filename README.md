@@ -48,6 +48,33 @@ calls. GitHub Actions additionally builds Docker, trains inside it, and exercise
 the actual HTTP endpoint. Neither test suite proves the course endpoints or LLM
 key work; verify those on the VM before claiming full M1 deployment.
 
+## Movie-preference profile worker
+
+The background profile worker (`src/service/profile_worker.py`) generates initial
+movie-preference profiles from user feedback. It supports both OpenAI and DeepSeek
+(via Tailscale Funnel to a local Ollama instance).
+
+### DeepSeek configuration
+
+To use DeepSeek R1 from the Spark machine over Tailscale Funnel:
+
+1. Copy `.env.example` to `.env` and fill in:
+   - `DEEPSEEK_API_KEY` (from `~/.config/powerdiff-funnel.env` on Spark)
+   - `USER_LOOKUP_URL_TEMPLATE` (your user preference API endpoint)
+   - `USER_API_BEARER_TOKEN` if the user API requires bearer authentication
+   - `DEEPSEEK_MODEL` if using a model other than `deepseek-r1:1.5b`
+
+2. Verify connectivity:
+   ```bash
+   export DEEPSEEK_API_KEY="<key-from-spark>"
+   python test_deepseek_profile.py
+   ```
+
+3. Review [DEEPSEEK_INTEGRATION.md](DEEPSEEK_INTEGRATION.md) for full setup, testing,
+   diagnostics, and troubleshooting guidance.
+
+The worker retries failed profiles and logs token usage for billing and monitoring.
+
 ## Continuous integration and deployment
 
 See [the CI/CD guide](deployment/CI_CD.md) for automatic tests, coverage reports, and manually triggered deployment to the CMU VM.

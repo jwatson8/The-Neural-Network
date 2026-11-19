@@ -24,7 +24,11 @@ from src.database.interactions import (
 )
 from src.service.cold_start import recommend_cold_start
 from src.service.course_stream import handle_line, main
-from src.service.profile_worker import PreferenceProfile, process_one
+from src.service.profile_worker import (
+    PreferenceProfile,
+    fetch_descriptions,
+    process_one,
+)
 from src.service.store import ProfileStore
 from src.tests.test_service import make_model
 
@@ -70,6 +74,43 @@ class LiveTests(unittest.TestCase):
         self.assertEqual(usage.status, "succeeded")
         handle_line(reopened, "topic", 0, 1, line)
         self.assertIsNone(reopened.claim_next())
+
+    def test_user_lookup_uses_optional_bearer_authentication(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b'{"self_description_likes":"space"}'
+
+        with patch.dict(
+            os.environ,
+            {
+                "USER_LOOKUP_URL_TEMPLATE": "https://users.example/{user_id}",
+                "USER_API_BEARER_TOKEN": "lookup-token",
+            },
+        ), patch("src.service.profile_worker.urlopen", return_value=response) as urlopen:
+            self.assertEqual(fetch_descriptions("user-1"), ("space", ""))
+            self.assertEqual(
+                urlopen.call_args.args[0].get_header("Authorization"),
+                "Bearer " + os.environ["USER_API_BEARER_TOKEN"],
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "USER_LOOKUP_URL_TEMPLATE": "https://users.example/{user_id}",
+                "USER_API_BEARER_TOKEN": "",
+            },
+        ), patch("src.service.profile_worker.urlopen", return_value=response) as urlopen:
+            fetch_descriptions("user-1")
+            self.assertIsNone(urlopen.call_args.args[0].get_header("Authorization"))
+
+    def test_profile_job_lease_exceeds_model_request_timeout(self):
+        job = SimpleNamespace(user_id="lease-user", attempts=1)
+        with patch(
+            "src.service.store.cold_start_jobs.claim", return_value=job
+        ) as claim:
+            self.assertEqual(self.store.claim_next()["user_id"], "lease-user")
+        claim.assert_called_once_with(lease_seconds=360)
 
     def test_watch_and_rating_rows_are_persisted_and_derive_history(self):
         movies.create(movie_id="live-movie", title="Live movie")
