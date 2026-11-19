@@ -81,7 +81,8 @@ jobs:
           python -m src.tests.ci_model_traffic bash -e -s <<'SWAP'
           bash deployment/daily_model.sh auto 2000-01-01
           bash deployment/daily_model.sh auto 2000-01-01
-          docker compose run --rm --no-deps daily-model-updater python -c 'from src.database.interactions import model_logs; rows=[r for r in model_logs.list_records() if r.model_name=="daily-2000-01-01"]; assert len(rows)==2; assert {r.test_result["outcome"] for r in rows}=={"eligible","promoted"}'
+          # Keep Compose from consuming the remaining commands in Bash's heredoc.
+          docker compose run --rm --no-deps -T --interactive=false daily-model-updater python -c 'from src.database.interactions import model_logs; rows=[r for r in model_logs.list_records() if r.model_name=="daily-2000-01-01"]; assert len(rows)==2; assert {r.test_result["outcome"] for r in rows}=={"eligible","promoted"}' </dev/null
           bash deployment/daily_model.sh rollback 2000-01-01
           bash deployment/daily_model.sh auto 2000-01-01
           SWAP
