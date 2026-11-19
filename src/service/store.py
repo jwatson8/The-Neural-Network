@@ -32,6 +32,7 @@ class ProfileStore:
         return {"positive": profile.positive, "negative": profile.negative}
 
     def enqueue(self, user_id):
+        users.create_missing_many([{"user_id": user_id}])
         return cold_start_jobs.enqueue(user_id=user_id)
 
     def claim_next(self, lease_seconds=360):
