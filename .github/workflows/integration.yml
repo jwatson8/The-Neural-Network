@@ -54,6 +54,7 @@ jobs:
       POSTGRES_PASSWORD: ci-only-not-a-production-secret
       BIND_ADDRESS: 127.0.0.1
       DAILY_MODEL_UPDATES_ENABLED: 'false'
+      BUILD_GIT_COMMIT_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
       - run: docker compose --profile live config --quiet

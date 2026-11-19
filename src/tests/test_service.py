@@ -110,6 +110,9 @@ class ServiceTests(unittest.TestCase):
         response = self.client.get('/recommend/warm')
         ids = response.get_data(as_text=True).split(',')
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['X-Model-Version-ID'], 'test')
+        self.assertEqual(response.headers['X-Request-ID'],
+                         str(self.create_recommendation_serve.call_args.kwargs['request_id']))
         self.assertTrue(response.mimetype.startswith('text/plain'))
         self.assertEqual(len(ids), 20)
         self.assertNotIn('movie-0', ids)

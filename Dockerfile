@@ -14,6 +14,8 @@ RUN pip install --no-cache-dir -r src/requirements.txt -r src/requirements-servi
 COPY src ./src
 COPY deployment ./deployment
 COPY planning/Milestone1/modelTesting/data ./data
+ARG GIT_COMMIT_SHA=unknown
+RUN printf '%s\n' "$GIT_COMMIT_SHA" > /app/build-revision.txt
 RUN useradd --uid 10001 --create-home appuser \
     && mkdir -p /state \
     && chown appuser:appuser /state

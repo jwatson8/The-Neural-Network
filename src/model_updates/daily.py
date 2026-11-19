@@ -22,6 +22,7 @@ from src.data_quality.drift import detect_event_type_drift, detect_rating_drift
 from src.data_quality.quality_logging import log_drift_result
 from src.model_updates.policy import rejection_reasons, POLICY
 from src.model_updates.audit import monitoring_context
+from src.model_updates.provenance import training_code, retain_original_data
 
 
 def digest(path):
@@ -114,6 +115,16 @@ def run(day, artifacts, data_dir=DEFAULT_DATA, snapshot=None, min_users=100):
         with gzip.open(run_dir / 'snapshot.json.gz', 'wb') as stream:
             stream.write(payload)
         report['snapshot_sha256'] = hashlib.sha256(payload).hexdigest()
+        report.update(training_code())
+        report['training_data_snapshot'] = dict(
+            database_path=(run_dir / 'snapshot.json.gz').relative_to(artifacts).as_posix(),
+            database_sha256=report['snapshot_sha256'],
+            checksum_encoding='SHA256 of uncompressed JSON bytes',
+            original_files=retain_original_data(data_dir, artifacts),
+            event_filter=f'event_time < {end.isoformat()}',
+            metadata_policy='Original metadata overlaid with captured PostgreSQL records',
+            deduplication='normalize_events: exact normalized event fields',
+        )
         report['source_sha256'] = hashlib.sha256(b''.join(
             p.read_bytes() for p in sorted(Path(__file__).parents[1].rglob('*.py')))).hexdigest()
         report['original_data_sha256'] = {p.name: digest(p) for p in sorted(Path(data_dir).glob('*.csv.gz'))}
@@ -163,7 +174,11 @@ def run(day, artifacts, data_dir=DEFAULT_DATA, snapshot=None, min_users=100):
                 final = fit([e for e in events if utc(e['timestamp']) < end], users, movies, components=32)
                 final['update_metadata'] = dict(version='daily-' + day.isoformat(),
                                                 training_end_exclusive=end.isoformat(),
-                                                snapshot_sha256=report['snapshot_sha256'])
+                                                snapshot_sha256=report['snapshot_sha256'],
+                                                git_commit_sha=report['git_commit_sha'],
+                                                training_data_snapshot=report['training_data_snapshot'],
+                                                training_source_sha256=report['training_source_sha256'],
+                                                libraries=report['libraries'])
                 check_model(final)
                 joblib.dump(final, run_dir / 'candidate.joblib')
                 check_model(joblib.load(run_dir / 'candidate.joblib'))

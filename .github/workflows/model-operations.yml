@@ -1,0 +1,38 @@
+name: Model operations and evidence
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [status, update]
+        default: status
+        description: Inspect evidence, or evaluate and promote a completed day's model
+      day:
+        type: string
+        description: Completed day YYYY-MM-DD (required for update)
+permissions:
+  contents: read
+jobs:
+  operate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, cmu-deploy]
+    timeout-minutes: 120
+    concurrency:
+      group: production-deployment
+      cancel-in-progress: false
+    steps:
+      - name: Run the trusted deployed implementation
+        env:
+          OPERATION: ${{ inputs.action }}
+          UPDATE_DAY: ${{ inputs.day }}
+        run: |
+          cd /home/the-neural-network
+          test "$(git -c safe.directory="$PWD" rev-parse HEAD)" = "$(cat state/deployed-commit.txt)"
+          test -z "$(git -c safe.directory="$PWD" status --porcelain --untracked-files=no)"
+          if [[ "$OPERATION" == update ]]; then
+            python3 deployment/observe_update.py "$UPDATE_DAY"
+          else
+            docker compose -p the-neural-network exec -T api python -m src.model_updates.status --artifacts /inputs </dev/null
+            curl --fail --max-time 5 http://127.0.0.1:8082/health
+            if [[ -f state/scheduled-update.json ]]; then cat state/scheduled-update.json; fi
+          fi
