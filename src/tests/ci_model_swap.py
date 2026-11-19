@@ -1,6 +1,6 @@
 """Build a clearly synthetic swap fixture ONLY for the isolated Docker CI job.
 
-This tests restart/checksum/rollback mechanics, not candidate model quality.
+The fixture exercises checksum verification, live activation, and rollback.
 """
 import os
 from pathlib import Path

@@ -20,13 +20,12 @@ def validate_model(model):
         raise ValueError('Content features do not match the catalog')
 
 
-def recommend(
-    model, user_id, k=20, *, exclude_movie_ids=None, allow_svd=True
-):
-    if not 1 <= k <= 20:
-        raise ValueError('k must be between 1 and 20')
+def recommendation_scores(model, user_id, *, allow_svd=True):
+    """Return unmasked model relevance scores and their actual route.
 
-    seen = model['seen'].get(user_id, set())
+    SVD scores are latent dot products; fallback scores are the bundle's learned
+    popularity values. Callers must apply history exclusions before selection.
+    """
     if allow_svd and uses_svd(model, user_id):
         user_index = model['ui'][user_id]
         scores = model['user_factors'][user_index] @ model['movie_factors']
@@ -35,7 +34,17 @@ def recommend(
         scores = model['popularity'].copy()
         route = 'popularity_fallback'
 
-    scores = np.asarray(scores).copy()
+    return np.asarray(scores).copy(), route
+
+
+def recommend(
+    model, user_id, k=20, *, exclude_movie_ids=None, allow_svd=True
+):
+    if not 1 <= k <= 20:
+        raise ValueError('k must be between 1 and 20')
+
+    seen = model['seen'].get(user_id, set())
+    scores, route = recommendation_scores(model, user_id, allow_svd=allow_svd)
     if seen:
         scores[list(seen)] = -np.inf
     excluded = {str(movie_id) for movie_id in (exclude_movie_ids or ())}

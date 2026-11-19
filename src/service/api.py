@@ -1,13 +1,14 @@
 """Flask recommendation API; model inference stays out of cold-start I/O."""
 
 import logging
-import hashlib
 import os
 import time
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID, uuid4
 
-import joblib
 from flask import Flask, Response, jsonify, request
 from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.exceptions import HTTPException
@@ -25,38 +26,73 @@ from src.data_quality.boundary import (
 )
 from src.data_quality.quality_logging import log_validation_failure
 from src.service.cold_start import recommend_cold_start
-from src.service.model_adapter import recommend, validate_model
+from src.service.cost_aware_treatment import CostAwareTreatmentServer
+from src.service.model_adapter import recommend
+from src.service.model_registry import ModelRegistry
 from src.service.store import ProfileStore
+from src.experimentation.manager import ExperimentManager
+from src.service.experiment_routing import RecommendationRouter, ServingRequest, ServingResult, TreatmentServer
 from src.model.routing import uses_svd
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'))
 
 
-def create_app(model=None, profile_store=None, config=None):
+def create_app(
+    model=None, profile_store=None, config=None, *,
+    experiment_manager: ExperimentManager | None = None,
+    treatment_server: TreatmentServer | None = None,
+    experiment_eligibility: Callable[[ServingRequest], bool] | None = None,
+) -> Flask:
     app = Flask(__name__)
     app.config.update(
+        EXPERIMENTS_ENABLED=os.getenv("EXPERIMENTS_ENABLED") == "true",
+        EXPERIMENT_ID=os.getenv("EXPERIMENT_ID"),
+        CONTROL_SERVING_POLICY="legacy",
+        COST_AWARE_TREATMENT_ENABLED=os.getenv("COST_AWARE_TREATMENT_ENABLED") == "true",
+        COST_AWARE_WEIGHT="0.15",
+        COST_AWARE_CANDIDATE_MULTIPLIER=5,
+        COST_AWARE_MAX_CANDIDATES=200,
         MODEL_PATH=os.getenv(
             'MODEL_PATH',
             str(Path(__file__).resolve().parents[2] / 'artifacts' / 'model.joblib'),
         ),
         MODEL_VERSION=os.getenv('MODEL_VERSION', 'unknown'),
+        MODEL_ACTIVATION_ENABLED=os.getenv('MODEL_ACTIVATION_ENABLED') == 'true',
+        CONTROL_MODEL_VERSION=os.getenv('CONTROL_MODEL_VERSION'),
+        TREATMENT_MODEL_VERSION=os.getenv('TREATMENT_MODEL_VERSION'),
         PROFILE_SEED_PATH=os.getenv('PROFILE_SEED_PATH', str(Path(__file__).resolve().parents[1] / 'model' / 'llm_profiles.json')),
     )
     if config:
         app.config.update(config)
 
-    model_sha256 = None
-    if model is None:
-        model_path = Path(app.config['MODEL_PATH'])
-        if model_path.is_file():
-            with model_path.open('rb') as stream:
-                model_sha256 = hashlib.file_digest(stream, 'sha256').hexdigest()
-                stream.seek(0)
-                model = joblib.load(stream)
+    enabled = app.config['EXPERIMENTS_ENABLED']
+    if not isinstance(enabled, bool):
+        raise ValueError('EXPERIMENTS_ENABLED must be a boolean')
+    experiment_id = None
+    if enabled:
+        try:
+            experiment_id = UUID(str(app.config['EXPERIMENT_ID']))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise ValueError('Enabled experimentation requires one explicit EXPERIMENT_ID UUID') from error
+    control_policy = app.config['CONTROL_SERVING_POLICY']
+    if not isinstance(control_policy, str) or not control_policy.strip() or len(control_policy) > 255:
+        raise ValueError('CONTROL_SERVING_POLICY must be a nonblank string of at most 255 characters')
+    manager = experiment_manager if experiment_manager is not None else ExperimentManager(enabled=enabled)
+    eligibility = experiment_eligibility if experiment_eligibility is not None else lambda context: True
+
+    managed = app.config['MODEL_ACTIVATION_ENABLED']
+    pins = {}
+    if enabled:
+        pins = {'control': app.config['CONTROL_MODEL_VERSION'],
+                'treatment': app.config['TREATMENT_MODEL_VERSION']}
+        if managed and not all(pins.values()):
+            raise ValueError('Managed experiments require explicit Control and Treatment model pins')
+    registry = ModelRegistry(app.config['MODEL_PATH'], app.config['MODEL_VERSION'], model=model, pins=pins)
+    app.extensions['model_registry'] = registry
+    # Preserve the injectable bundle interface used by offline callers.
     if model is not None:
-        validate_model(model)
-        app.config['MODEL_VERSION'] = model.get('update_metadata', {}).get('version', app.config['MODEL_VERSION'])
+        app.extensions['recommendation_model'] = model
 
     store = profile_store or ProfileStore()
     if profile_store is None:
@@ -64,8 +100,24 @@ def create_app(model=None, profile_store=None, config=None):
             store.seed_profiles(app.config['PROFILE_SEED_PATH'])
         except Exception as error:
             logger.warning('profile_seed_failed error_type=%s', type(error).__name__)
-    app.extensions['recommendation_model'] = model
+    cost_aware_enabled = app.config['COST_AWARE_TREATMENT_ENABLED']
+    if not isinstance(cost_aware_enabled, bool):
+        raise ValueError('COST_AWARE_TREATMENT_ENABLED must be a boolean')
+    cost_config = None
+    if enabled and cost_aware_enabled:
+        if treatment_server is not None:
+            raise ValueError('Choose an injected Treatment or the built-in cost-aware adapter, not both')
+        from src.experimentation.cost_reranking import CostAwareConfig
+
+        cost_config = CostAwareConfig(app.config['COST_AWARE_WEIGHT'],
+                                      app.config['COST_AWARE_CANDIDATE_MULTIPLIER'],
+                                      app.config['COST_AWARE_MAX_CANDIDATES'])
+    router = RecommendationRouter(treatment=treatment_server)
+    if managed:
+        registry.watch()
     app.extensions['profile_store'] = store
+    app.extensions['experiment_manager'] = manager
+    app.extensions['recommendation_router'] = router
 
     @app.errorhandler(HTTPException)
     def handle_http_error(error):
@@ -86,13 +138,25 @@ def create_app(model=None, profile_store=None, config=None):
 
     @app.get('/health')
     def health():
-        ready = app.extensions['recommendation_model'] is not None
+        snapshot = registry.snapshot()
+        default = snapshot.default
+        registry_ready = default is not None and app.extensions.get('recommendation_model', True) is not None
+        ready = registry_ready
         try:
             store.healthy()
         except Exception:
             ready = False
-        return jsonify(status='ok' if ready else 'not_ready', model_version=app.config['MODEL_VERSION'],
-                       model_sha256=model_sha256), 200 if ready else 503
+        return jsonify(
+            status='ok' if ready else 'not_ready',
+            model_version=default.version if default else app.config['MODEL_VERSION'],
+            model_sha256=default.sha256 if default else None,
+            registry_ready=registry_ready,
+            experiment_models_ready=all(pin is not None for pin in snapshot.pins.values()),
+            activation_enabled=managed,
+            activation_id=snapshot.activation_id,
+            activation_status=snapshot.activation_status,
+            activation_error=snapshot.activation_error,
+        ), 200 if ready else 503
 
     @app.get('/database/summary')
     def public_database_summary():
@@ -150,46 +214,98 @@ def create_app(model=None, profile_store=None, config=None):
 
         request_received_at = datetime.now(UTC)
         started = time.perf_counter()
-        loaded_model = app.extensions['recommendation_model']
-        if loaded_model is None:
+        snapshot = registry.snapshot()
+        default = snapshot.default
+        if default is None or app.extensions.get('recommendation_model', True) is None:
             return jsonify(error='Service Unavailable', message='Model unavailable'), 503
 
         users.create_missing_many([{'user_id': user_id}])
 
         history_rows = user_movie_history.get_user_history(user_id)
-        excluded_movie_ids = {row.movie_id for row in history_rows}
-        excluded_movie_ids.update(
-            str(loaded_model['movies'][index]['movie_id'])
-            for index in loaded_model['seen'].get(user_id, ())
-        )
-        if history_rows and uses_svd(loaded_model, user_id):
-            movie_ids, route = recommend(
-                loaded_model, user_id, k=20,
-                exclude_movie_ids=excluded_movie_ids,
-            )
-        else:
+        excluded_movie_ids = {str(row.movie_id) for row in history_rows}
+        context = ServingRequest(user_id=user_id, exclude_movie_ids=frozenset(excluded_movie_ids),
+                                 has_history=bool(history_rows))
+        decision = None
+        experiment_reason = 'disabled'
+        if enabled and app.config['EXPERIMENTS_ENABLED'] is True:
             try:
-                result = recommend_cold_start(
-                    loaded_model, store, user_id, k=20,
-                    exclude_movie_ids=excluded_movie_ids,
-                    allow_svd=False,
-                )
-            except (SQLAlchemyError, RuntimeError) as error:
-                result = None
-                logger.warning('cold_start_store_read_failed user_id=%s error_type=%s', user_id, type(error).__name__)
-            if result is None:
+                eligible = eligibility(context)
+                if not isinstance(eligible, bool):
+                    raise ValueError('experiment eligibility must return a boolean')
+                decision = manager.decide(experiment_id=experiment_id, user_id=user_id,
+                                          eligible=eligible, now=request_received_at)
+                experiment_reason = decision.reason.value
+            except Exception as error:
+                decision = None
+                experiment_reason = 'experiment_error'
+                logger.warning('experiment_decision_failed error_type=%s', type(error).__name__)
+
+        def serve_control(handle):
+            loaded_model = handle.bundle
+            if history_rows and uses_svd(loaded_model, user_id):
                 movie_ids, route = recommend(
                     loaded_model, user_id, k=20,
                     exclude_movie_ids=excluded_movie_ids,
-                    allow_svd=False,
                 )
-                try:
-                    store.enqueue(user_id)
-                except (SQLAlchemyError, RuntimeError) as error:
-                    logger.warning('profile_job_enqueue_failed user_id=%s error_type=%s', user_id, type(error).__name__)
             else:
-                movie_ids, route = result
+                try:
+                    result = recommend_cold_start(
+                        loaded_model, store, user_id, k=20,
+                        exclude_movie_ids=excluded_movie_ids,
+                        allow_svd=False,
+                    )
+                except (SQLAlchemyError, RuntimeError) as error:
+                    result = None
+                    logger.warning('cold_start_store_read_failed user_id=%s error_type=%s', user_id, type(error).__name__)
+                if result is None:
+                    movie_ids, route = recommend(
+                        loaded_model, user_id, k=20,
+                        exclude_movie_ids=excluded_movie_ids,
+                        allow_svd=False,
+                    )
+                    try:
+                        store.enqueue(user_id)
+                    except (SQLAlchemyError, RuntimeError) as error:
+                        logger.warning('profile_job_enqueue_failed user_id=%s error_type=%s', user_id, type(error).__name__)
+                else:
+                    movie_ids, route = result
 
+            # The policy is the whole legacy pipeline, including its cold/popular paths.
+            return ServingResult(tuple(movie_ids), handle.version, route,
+                                 control_policy,
+                                 fallback_path='popularity_fallback' if route == 'popularity_fallback' else None,
+                                 fulfilled=True, model_sha256=handle.sha256)
+
+        control = snapshot.pins.get('control', default)
+        treatment = snapshot.pins.get('treatment', default)
+        control_available = control is not None
+        if 'control' in snapshot.pins and control_available and decision is not None:
+            control_available = control.version == decision.version and control_policy == decision.policy
+        request_router = router
+        if decision is not None and decision.variant == 'treatment' and treatment is not None:
+            bundle = treatment.bundle
+            trained_history = frozenset(
+                str(bundle['movies'][index]['movie_id']) for index in bundle['seen'].get(user_id, ())
+            )
+            context = replace(context, exclude_movie_ids=context.exclude_movie_ids | trained_history)
+            if cost_config is not None:
+                request_router = RecommendationRouter(CostAwareTreatmentServer.for_model(treatment, store, cost_config))
+            elif treatment_server is not None and 'treatment' in snapshot.pins:
+                def serve_pinned_treatment(request, assignment):
+                    result = treatment_server(request, assignment)
+                    if (result.model_version != treatment.version
+                            or result.model_sha256 != treatment.sha256):
+                        raise ValueError('Treatment did not serve the pinned artifact')
+                    return result
+
+                request_router = RecommendationRouter(serve_pinned_treatment)
+        served = request_router.serve(
+            context, decision, lambda: serve_control(default),
+            assigned_control=(lambda: serve_control(control)) if 'control' in snapshot.pins else None,
+            control_available=control_available,
+            treatment_available=treatment is not None,
+        )
+        movie_ids, route = served.recommendations, served.model_route
         response_body = ','.join(movie_ids)
         response_items, errors = validate_recommendation_response(response_body)
         if errors:
@@ -197,11 +313,18 @@ def create_app(model=None, profile_store=None, config=None):
             return jsonify(error='Internal Server Error', message='Recommendation generation failed'), 500
         movie_ids = [item.movie_id for item in response_items]
 
+        response = Response(response_body, status=200, mimetype='text/plain')
+        request_id = uuid4()
+        exposure = {}
+        if decision is not None and decision.assigned and decision.assignment_id is not None and served.fulfilled:
+            exposure['experiment_assignment_id'] = decision.assignment_id
         recommendation_serves.create(
+            request_id=request_id,
+            **exposure,
             user_id=user_id,
             served_at=datetime.now(UTC),
             model_route=route,
-            model_version=app.config['MODEL_VERSION'],
+            model_version=served.model_version,
             recommendations=[{'movie_id': movie_id} for movie_id in movie_ids],
             request_received_at=request_received_at,
             serve_duration_ms=0,
@@ -209,10 +332,20 @@ def create_app(model=None, profile_store=None, config=None):
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
         logger.info(
-            'recommendation user_id=%s route=%s model_version=%s duration_ms=%.2f status=200',
-            user_id, route, app.config['MODEL_VERSION'], elapsed_ms,
+            'recommendation user_id=%s route=%s model_version=%s duration_ms=%.2f status=200 request_id=%s model_sha256=%s',
+            user_id, route, served.model_version, elapsed_ms, request_id, served.model_sha256,
         )
-        return Response(response_body, status=200, mimetype='text/plain')
+        if enabled:
+            logger.info(
+                'experiment_serve request_id=%s assignment_id=%s intended_assignment_id=%s intended_variant=%s '
+                'actual_policy=%s policy_version=%s underlying_route=%s fallback_path=%s fulfilled=%s decision=%s',
+                request_id, exposure.get('experiment_assignment_id'),
+                decision.assignment_id if decision is not None else None,
+                decision.variant if decision is not None else None,
+                served.policy, served.policy_version, served.underlying_route,
+                served.fallback_path, bool(exposure), experiment_reason,
+            )
+        return response
 
     return app
 

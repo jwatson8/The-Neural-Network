@@ -21,8 +21,13 @@ from src.database.models import Movie
 from src.database.schemas import MovieCreate, MovieUpdate
 
 __all__ = [
-    "create", "get", "update", "list_records", "create_missing_many",
+    "create",
+    "create_missing_many",
+    "get",
     "get_existing_ids",
+    "get_license_costs",
+    "list_records",
+    "update",
 ]
 
 ### ----------- Helper Functions -----------
@@ -42,10 +47,7 @@ def _update(session: Session, movie: Movie, data: MovieUpdate) -> Movie:
 
 def _list(session: Session, *, offset: int, limit: int) -> list[Movie]:
     statement = (
-        select(Movie)
-        .order_by(Movie.movie_id)
-        .offset(offset)
-        .limit(min(limit, 1000))
+        select(Movie).order_by(Movie.movie_id).offset(offset).limit(min(limit, 1000))
     )
     return list(session.exec(statement).all())
 
@@ -59,6 +61,16 @@ def _get_existing_ids(session: Session, movie_ids: set[str]) -> set[str]:
         return set()
     statement = select(Movie.movie_id).where(Movie.movie_id.in_(movie_ids))
     return set(session.exec(statement).all())
+
+
+def _get_license_costs(
+    session: Session,
+    movie_ids: list[str],
+) -> dict[str, Decimal | None]:
+    statement = select(Movie.movie_id, Movie.license_cost).where(
+        Movie.movie_id.in_(movie_ids)
+    )
+    return dict(session.exec(statement).all())
 
 
 ### ----------- Individual Functions -----------
@@ -174,3 +186,27 @@ def get_existing_ids(movie_ids: Iterable[str]) -> set[str]:
     if not normalized:
         return set()
     return run(lambda session: _get_existing_ids(session, normalized))
+
+
+def get_license_costs(movie_ids: Iterable[str]) -> dict[str, Decimal | None]:
+    """Read catalog membership and reference prices in one bounded SELECT.
+
+    Missing keys mean nonexistent catalog movies; None means an existing movie
+    with unknown price. This reads movies, never the observed licensing ledger.
+    At most 500 distinct IDs are accepted; an empty request performs no query.
+    """
+    ids = []
+    seen = set()
+    for movie_id in movie_ids:
+        if not isinstance(movie_id, str) or not movie_id.strip() or len(movie_id) > 255:
+            raise ValueError(
+                "movie IDs must be nonblank strings of at most 255 characters"
+            )
+        if movie_id not in seen:
+            ids.append(movie_id)
+            seen.add(movie_id)
+        if len(ids) > 500:
+            raise ValueError("at most 500 distinct movie IDs may be fetched")
+    if not ids:
+        return {}
+    return run(lambda session: _get_license_costs(session, ids))
