@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from urllib.request import urlopen
 import joblib
 from src.model.recommender import fit, load_data
+from src.model_updates.provenance import training_code, retain_original_data
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA = ROOT / 'planning/Milestone1/modelTesting/data'
@@ -38,6 +39,10 @@ def prepare(data_dir, model_path, download=False):
                     model_sha256=hashlib.sha256(model_path.read_bytes()).hexdigest(),
                     training_source_sha256=hashlib.sha256(Path(__file__).with_name('recommender.py').read_bytes()).hexdigest(),
                     data_sha256={name: item['sha256'] for name, item in manifest.items()})
+    metadata.update(training_code())
+    metadata['training_data_snapshot'] = dict(
+        original_files=retain_original_data(data_dir, model_path.parent),
+        event_filter='All events in the fixed course snapshot')
     model_path.with_suffix('.json').write_text(json.dumps(metadata, indent=2)+'\n', encoding='utf-8')
     print(json.dumps(metadata, indent=2))
     return model

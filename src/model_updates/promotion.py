@@ -1,6 +1,6 @@
 """Publish approved model activation instructions and reconcile the champion alias."""
 import argparse
-from datetime import date
+from datetime import date, datetime, timezone
 import fcntl
 import os
 from pathlib import Path
@@ -171,7 +171,8 @@ def finish(artifacts, day, acknowledgement, expected_sha256, *, rollback=False):
         raise ValueError('Activated artifact checksum mismatch')
     if digest(live) != request['sha256']:
         replace(source, live)
-    write_json(completed, {'status': status, **transaction})
+    write_json(completed, {**transaction, 'status': status,
+                           'completed_at': datetime.now(timezone.utc).isoformat()})
     pending.unlink()
 
 

@@ -2,7 +2,10 @@ name: the-neural-network
 
 x-service: &service
   image: the-neural-network:${DEPLOY_TAG:-local}
-  build: .
+  build:
+    context: .
+    args:
+      GIT_COMMIT_SHA: ${BUILD_GIT_COMMIT_SHA:-unknown}
   restart: unless-stopped
   init: true
   logging:
@@ -26,7 +29,9 @@ services:
     mem_limit: 2g
     environment:
       <<: *database-connection
-      DAILY_MODEL_UPDATES_ENABLED: ${DAILY_MODEL_UPDATES_ENABLED:-true}
+      # GitHub invokes training + promotion on the persisted 36-hour cadence.
+      # Disable the old independent daily trainer to avoid duplicate schedules.
+      DAILY_MODEL_UPDATES_ENABLED: "false"
       OPENBLAS_NUM_THREADS: "1"
       OMP_NUM_THREADS: "1"
     volumes:

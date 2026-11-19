@@ -26,6 +26,7 @@ previous=$("${git_cmd[@]}" rev-parse HEAD)
 echo "Previous checkout: $previous; deploying: $sha"
 "${git_cmd[@]}" checkout --detach "$sha"
 export DEPLOY_TAG="$sha"
+export BUILD_GIT_COMMIT_SHA="$sha"
 export DAILY_MODEL_IMAGE="the-neural-network:$sha"
 export LOCAL_UID=$(id -u) LOCAL_GID=$(id -g)
 compose=(docker compose -p the-neural-network)

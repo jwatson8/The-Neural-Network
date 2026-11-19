@@ -315,6 +315,10 @@ def create_app(
 
         response = Response(response_body, status=200, mimetype='text/plain')
         request_id = uuid4()
+        response.headers['X-Request-ID'] = str(request_id)
+        response.headers['X-Model-Version-ID'] = served.model_version
+        if served.model_sha256:
+            response.headers['X-Model-SHA256'] = served.model_sha256
         exposure = {}
         if decision is not None and decision.assigned and decision.assignment_id is not None and served.fulfilled:
             exposure['experiment_assignment_id'] = decision.assignment_id
@@ -332,8 +336,8 @@ def create_app(
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
         logger.info(
-            'recommendation user_id=%s route=%s model_version=%s duration_ms=%.2f status=200 request_id=%s model_sha256=%s',
-            user_id, route, served.model_version, elapsed_ms, request_id, served.model_sha256,
+            'recommendation user_id=%s route=%s model_version=%s duration_ms=%.2f status=200 request_id=%s model_sha256=%s model_version_id=%s',
+            user_id, route, served.model_version, elapsed_ms, request_id, served.model_sha256, served.model_version,
         )
         if enabled:
             logger.info(

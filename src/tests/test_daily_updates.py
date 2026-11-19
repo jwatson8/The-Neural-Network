@@ -152,6 +152,10 @@ class PipelineTests(unittest.TestCase):
              patch('src.model_updates.daily.fit', wraps=fit) as training:
             report = run(self.day, self.root, self.data, self.snapshot)
         self.assertEqual(report['status'], 'awaiting_approval')
+        self.assertIn('git_commit_sha', report)
+        self.assertEqual(report['training_data_snapshot']['database_sha256'], report['snapshot_sha256'])
+        metadata = joblib.load(self.root / 'daily' / str(self.day) / 'candidate.joblib')['update_metadata']
+        self.assertEqual(metadata['training_data_snapshot'], report['training_data_snapshot'])
         self.assertEqual(self.drift_logger.call_count, 2)
         self.assertEqual(len(training.call_args_list[0].args[0]), 2)
         self.assertEqual(len(training.call_args_list[1].args[0]), 3)

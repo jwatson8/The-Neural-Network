@@ -1,8 +1,8 @@
-name: Automatic daily model promotion
+name: Scheduled model updates (36 hours)
 on:
   schedule:
-    # 03:17 EST / 04:17 EDT, after the VM's 02:00 Eastern training job.
-    - cron: '17 8 * * *'
+    # Check hourly; persisted state enforces the actual elapsed-hour interval.
+    - cron: '17 * * * *'
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,6 +16,9 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Evaluate and promote using the deployed code on the VM
+        env:
+          MODEL_UPDATE_INTERVAL_HOURS: ${{ vars.MODEL_UPDATE_INTERVAL_HOURS || '36' }}
+          MODEL_UPDATE_START_AT: ${{ vars.MODEL_UPDATE_START_AT }}
         # No PR checkout or secrets needed: this runner is already on the VM.
         # No environment approval gate: the repository variable is the one-time opt-in.
         run: |
@@ -23,7 +26,7 @@ jobs:
           test -f state/deployed-commit.txt
           test "$(git -c safe.directory="$PWD" rev-parse HEAD)" = "$(cat state/deployed-commit.txt)"
           test -z "$(git -c safe.directory="$PWD" status --porcelain --untracked-files=no)"
-          bash deployment/daily_model.sh auto
+          python3 deployment/scheduled_update.py
       - name: Results location
         if: always()
         run: |
