@@ -98,6 +98,27 @@ class EvaluationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             capture(engine, start, end, limit=0)
 
+    def test_snapshot_caps_are_explicit_and_unrelated_users_are_not_loaded(self):
+        engine = create_engine('sqlite://')
+        self.addCleanup(engine.dispose)
+        SQLModel.metadata.create_all(engine)
+        start, end = window(date(2026, 1, 1))
+        with Session(engine) as session:
+            session.add_all([User(user_id='u'), User(user_id='unrelated')])
+            session.add(Movie(movie_id='m', title='Space adventure'))
+            for index in range(4):
+                session.add(StreamEvent(user_id='u', movie_id='m', event_type='rating', rating=index + 6,
+                                        event_time=start + timedelta(minutes=index)))
+            session.add(StreamEvent(user_id='u', movie_id='m', event_type='rating', rating=10,
+                                    event_time=start - timedelta(days=8)))
+            session.commit()
+        snapshot = capture(engine, start, end, event_limit=2)
+        self.assertEqual([row['rating'] for row in snapshot['events']], [9, 8])
+        self.assertEqual([row['user_id'] for row in snapshot['users']], ['u'])
+        self.assertEqual(snapshot['sampling']['event_partitions']['heldout_and_tail'],
+                         {'retained': 2, 'capped': True})
+        self.assertEqual(snapshot['sampling']['event_partitions']['history']['retained'], 0)
+
 
 class PipelineTests(unittest.TestCase):
     def setUp(self):
@@ -130,6 +151,16 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(report['status'], 'insufficient_data')
         self.assertEqual(digest(self.root / 'model.joblib'), before)
         self.assertEqual(run(self.day, self.root, self.data, {'invalid': True}), report)
+
+    def test_retry_archives_failure_but_never_replaces_completed_decision(self):
+        with self.assertRaises(KeyError):
+            run(self.day, self.root, self.data, {})
+        report = run(self.day, self.root, self.data, self.snapshot, retry_failed=True)
+        self.assertEqual(report['status'], 'insufficient_data')
+        archived = list((self.root / 'failed-attempts').glob('*/report.json'))
+        self.assertEqual(len(archived), 1)
+        self.assertEqual(json.loads(archived[0].read_text())['status'], 'failed')
+        self.assertEqual(run(self.day, self.root, self.data, {}, retry_failed=True), report)
 
     def test_unknown_provenance_and_overlap_are_blocked(self):
         with self.assertRaises(ValueError):

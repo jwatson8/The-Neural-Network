@@ -49,6 +49,17 @@ these records. Keep the artifacts volume backed up and restrict its access: the
 training snapshot contains user data. Older models without recorded Git provenance
 cannot acquire a historical training commit just by deploying newer code.
 
+To bound VM memory, each run combines the original dataset with the newest
+100,000 events from the seven days preceding the held-out day and the newest
+100,000 events from the held-out day plus its one-hour attribution tail. The
+training cutoff still excludes the tail. Ordering uses event timestamp and UUID.
+Only users/profiles referenced by selected events are loaded. Each telemetry
+table is capped at 20,000 records; the full movie catalog is retained. The manifest
+records which caps were hit. This is a recent-data sample, not complete historical
+training or full-day online evaluation. Selection can bias evaluation toward recent
+activity; production totals must come from the monitoring pipeline. Failed training
+attempts may be archived and retried; completed decisions are never overwritten.
+
 To trace a request and verify its model and data checksums on the VM:
 
 ```bash
