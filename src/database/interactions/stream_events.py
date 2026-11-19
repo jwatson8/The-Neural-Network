@@ -130,7 +130,12 @@ def _search(
     )
 
 
-def _create_many(session: Session, records: list[StreamEventCreate]) -> int:
+def _create_many(
+    session: Session,
+    records: list[StreamEventCreate],
+    *,
+    projection_order: Literal["event_time", "input"],
+) -> int:
     if not records:
         return 0
     _lock_watch_users(session, records)
@@ -152,10 +157,8 @@ def _create_many(session: Session, records: list[StreamEventCreate]) -> int:
         if event_id in inserted_ids and event_id not in materialized_ids:
             inserted_events.append((input_order, StreamEvent.model_construct(**event)))
             materialized_ids.add(event_id)
-    inserted_events = sorted(
-        inserted_events,
-        key=lambda item: (item[1].event_time, item[0]),
-    )
+    if projection_order == "event_time":
+        inserted_events.sort(key=lambda item: (item[1].event_time, item[0]))
     from src.database.interactions._stream_event_batch import materialize_many
 
     materialize_many(session, [event for _, event in inserted_events])
@@ -206,10 +209,20 @@ def list_records(*, offset: int = 0, limit: int = 100) -> list[StreamEvent]:
     return run(lambda session: _list(session, offset=offset, limit=limit))
 
 
-def create_many(records: Iterable[StreamEventCreate | Mapping[str, object]]) -> int:
-    """Insert a validated event batch atomically, skipping duplicate event UUIDs."""
+def create_many(
+    records: Iterable[StreamEventCreate | Mapping[str, object]],
+    *,
+    projection_order: Literal["event_time", "input"] = "event_time",
+) -> int:
+    """Insert events atomically and project them by occurrence or input order."""
+    if projection_order not in ("event_time", "input"):
+        raise ValueError("projection_order must be event_time or input")
     validated = [StreamEventCreate.model_validate(record) for record in records]
-    return run(lambda session: _create_many(session, validated))
+    return run(
+        lambda session: _create_many(
+            session, validated, projection_order=projection_order
+        )
+    )
 
 
 def search(

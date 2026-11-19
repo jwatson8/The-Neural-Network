@@ -159,7 +159,10 @@ class ProfileStore:
                 [{"user_id": user_id} for user_id in sorted(observed_user_ids)]
             )
 
-        inserted = stream_events.create_many(accepted_events)
+        inserted = stream_events.create_many(
+            accepted_events,
+            projection_order="input",
+        )
 
         valid_requests = []
         for record in request_records:
