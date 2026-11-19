@@ -114,13 +114,20 @@ def process_one(store, client, model_name):
             llm_succeeded = True
             input_tokens = getattr(usage, 'input_tokens', None) or getattr(usage, 'prompt_tokens', 0)
             output_tokens = getattr(usage, 'output_tokens', None) or getattr(usage, 'completion_tokens', 0)
+            estimated_cost_usd = None
+            if input_tokens is not None and output_tokens is not None:
+                estimated_cost_usd = (
+                    Decimal(input_tokens) * Decimal("0.18")
+                    + Decimal(output_tokens) * Decimal("0.18")
+                ) / Decimal("1000000")
             usage_record = llm_usage.create(
                 user_id=user_id,
-                provider="openai",
+                provider="deepseek",
                 model_name=model_name,
                 status="succeeded",
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                estimated_cost_usd=estimated_cost_usd,
             )
             llm_request_id = usage_record.request_id
         else:
