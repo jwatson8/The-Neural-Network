@@ -112,8 +112,8 @@ def process_one(store, client, model_name):
             llm_called = True
             profile, usage = generate_profile(client, model_name, likes, dislikes)
             llm_succeeded = True
-            input_tokens = getattr(usage, 'input_tokens', None) or getattr(usage, 'prompt_tokens', 0)
-            output_tokens = getattr(usage, 'output_tokens', None) or getattr(usage, 'completion_tokens', 0)
+            input_tokens = getattr(usage, 'input_tokens', None) or getattr(usage, 'prompt_tokens', None)
+            output_tokens = getattr(usage, 'output_tokens', None) or getattr(usage, 'completion_tokens', None)
             estimated_cost_usd = None
             if input_tokens is not None and output_tokens is not None:
                 estimated_cost_usd = (
@@ -154,7 +154,7 @@ def process_one(store, client, model_name):
             try:
                 llm_usage.create(
                     user_id=user_id,
-                    provider="openai",
+                    provider="deepseek",
                     model_name=model_name,
                     status="failed",
                 )
