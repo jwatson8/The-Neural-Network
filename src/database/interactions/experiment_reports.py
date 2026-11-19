@@ -1,16 +1,17 @@
 """Validated, transaction-owned persistence for experiment_reports; no experiment execution."""
 
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, NAMESPACE_URL, uuid5
+import json
 
 from sqlmodel import Session, select
 
-from src.database.interactions._shared import create_record, run, schema_values
+from src.database.interactions._shared import create_record, dialect_insert, run, schema_values
 from src.database.models import Experiment, ExperimentReport
 from src.database.interactions._pagination import SearchCursor, SearchPage, search_records
 from src.database.schemas import ExperimentReportCreate
 
-__all__ = ["create", "get", "list_records", "search"]
+__all__ = ["create", "get", "list_records", "search", "save_revision"]
 
 
 def _create(session: Session, data: ExperimentReportCreate) -> ExperimentReport:
@@ -64,3 +65,32 @@ def search(
         id_column=ExperimentReport.report_id, scope="experiment_reports:generated_at",
         conditions=conditions, start=start, end=end, cursor=cursor, limit=limit,
     ))
+
+
+def save_revision(data: ExperimentReportCreate) -> tuple[ExperimentReport, bool]:
+    """Append an immutable input revision; identical retry returns the same UUID.
+
+    The existing PK supplies concurrent uniqueness without a new migration.
+    Data/config/coverage changes must change source_fingerprint. Other writers
+    using random UUIDs are outside this idempotency contract; no rows are deleted.
+    """
+    validated = ExperimentReportCreate.model_validate(data)
+    fingerprint = validated.results.get('source_fingerprint')
+    if not isinstance(fingerprint, str) or len(fingerprint) != 64 or any(c not in '0123456789abcdef' for c in fingerprint):
+        raise ValueError('save_revision requires a SHA-256 source_fingerprint')
+    key = json.dumps([str(validated.experiment_id), validated.window_start.isoformat(),
+                      validated.window_end.isoformat(), validated.analysis_version, fingerprint], separators=(',', ':'))
+    report_id = uuid5(NAMESPACE_URL, 'experiment-report:' + key)
+
+    def operation(session):
+        values = schema_values(validated)
+        values['report_id'] = report_id
+        record = ExperimentReport.model_validate(values)
+        inserted = session.execute(dialect_insert(session, ExperimentReport).values(**record.model_dump())
+            .on_conflict_do_nothing(index_elements=['report_id']).returning(ExperimentReport.report_id)).scalar_one_or_none()
+        stored = session.get(ExperimentReport, report_id)
+        if stored is None or stored.results.get('source_fingerprint') != fingerprint:
+            raise RuntimeError('report revision conflict; retry the complete operation')
+        return stored, inserted is not None
+
+    return run(operation)

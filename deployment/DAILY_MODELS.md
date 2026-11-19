@@ -62,25 +62,43 @@ Reports use `insufficient_data`, `retain_champion`, `awaiting_approval`, or `fai
 
 Each run retains the frozen database snapshot, original data hashes, source-code hash, champion copy/hash, evaluation artifact, metric definitions/settings, decision reasons and, when eligible, the final candidate/hash. Files under `artifacts/` stay ignored by Git. They contain user data: keep them within the team's access-controlled VM storage, not public CI artifacts. A failed job does not touch the production model; inspect its report `stage`/`error_type`, database availability and container logs.
 
-## Approve and promote
+## Approve, promote, and recover
 
-Review the report, confirm ingestion/telemetry coverage, and choose a time for a short API restart:
+Review the report and confirm ingestion and telemetry coverage before approving a manual update.
 
 ```bash
 bash deployment/daily_model.sh promote 2026-11-07
 ```
 
-The command refuses a failed gate, a modified candidate, or a champion that changed since evaluation. It saves a backup, atomically replaces `artifacts/model.joblib`, restarts the API and verifies the loaded artifact checksum via `/health` plus a recommendation response. Failed verification restores the backup and checks the restored API; recovery failure exits with an error. Only the API restarts, not the database or ingestion services. The artifact's embedded model version is used in API logs/health instead of the old `.env` model label. This command never deletes database volumes or overwrites `.env`.
+Manual and automatic promotion share the existing deployment and daily locks. The writer verifies the approved refit against the report and checks that the evaluator's champion is still current. It registers the candidate and previous champion by checksum, preserves `previous.joblib`, journals the transaction in `promotion-pending.json`, and atomically publishes `model-activation.json`. That instruction contains a unique activation ID, version, target SHA-256, and expected base SHA-256. A local filesystem lock serializes the manifest replacement with the worker's final publication check. The API mount stays read-only.
+
+The worker checks the instruction, verifies the candidate checksum and embedded version, and warms the bundle while traffic continues on the current snapshot. Every request captures one snapshot for selection, inference, and audit. The existing `/health` fields report the actual default. `activation_id`, `activation_status`, and `activation_error` report acknowledgement or an operator-safe failure code. The script requires the exact ID and loaded digest before running the existing recommendation smoke check. Only then does it update the evaluator's `model.joblib` alias, write `promotion.json`, clear the pending journal, and record the automatic outcome as before. The smoke check exercises the public route and database. If experiments are enabled it can hit a pinned arm, so the digest check and candidate warmup also matter.
 
 ```bash
-# Explicitly revert the most recent applicable promoted artifact, or recover a pending attempt:
 bash deployment/daily_model.sh rollback 2026-11-07
 ```
 
-Code deployment, scheduler training and manual promotion use shared file locks. If busy, retry after the current operation finishes. A process interruption can leave `artifacts/promotion-pending.json`; use the rollback command before another promotion. After success, `promotion.json` records the decision; `previous.joblib` is retained.
+Failed loading or smoke verification requests rollback to the previous immutable artifact. Rollback has its own activation ID and must pass the same verification before the alias and outcome are finalized. If verification fails, the transaction stays pending and new daily evaluations wait for recovery. After interruption, run rollback for the pending date under the same locks. This works before or after the forward acknowledgement, including when a worker starts from the last verified alias and reconciles the manifest. Repeating the rollback uses the same instruction. A newer promotion blocks rollback of an older transaction. Keep the manifest, lock file, registrations, and journal together. The protocol assumes a trusted writer and a local filesystem with atomic rename and advisory locking.
 
-## Tests and limits
+Older API revisions lack the activation capability and the new script refuses to promote against them. Resolve a pending transaction from an older checkout using that revision's recovery instructions before upgrading. Daily **model** updates and rollback use the existing worker. The initial API image rollout and future code deployments can recreate the single API and interrupt service.
 
-`python -m pytest` includes synthetic temporal split, late-arrival, DST, metric, data-read, rejection, audit idempotence, artifact integrity and rollback tests. PR CI invokes the job against isolated PostgreSQL, confirms an empty production window leaves the model unchanged, and tests automatic promotion/retry/rollback with explicitly synthetic scores. PR CI never accesses production; only the enabled main-only scheduled workflow does.
+## Register and pin experiment models
 
-No live A/B experiment, database ingestion rewrite, LLM call, API metadata fetch, or automatic snapshot deletion is introduced here. Actual improvement and production update evidence must come from your VM data. An empty or incomplete ingestion pipeline can result in daily retention rather than a new model; do not weaken gates just to force a promotion.
+```bash
+bash deployment/daily_model.sh register-champion
+bash deployment/daily_model.sh register 2026-11-07
+```
+
+These commands register artifacts under the same locks without opening an experiment or switching the default. The first registers the current champion, including a matching legacy `model.json` if available. The second registers an approved refit from the daily report. `models/<sha256>.joblib` holds immutable bytes. The version registration in `models/` binds one version label to one digest and retains training metadata or a source report. Keep the registrations and matching training snapshots for provenance.
+
+Compose defaults to disabled experiments. For a future explicitly authorized experiment, register both versions before starting the worker with `EXPERIMENTS_ENABLED=true`, `EXPERIMENT_ID`, `CONTROL_MODEL_VERSION`, and `TREATMENT_MODEL_VERSION`. For licensing cost, set `COST_AWARE_TREATMENT_ENABLED=true` and use the same artifact in both arms to isolate reranking. The Treatment fingerprint is still derived from the pinned version and cost configuration, with weight `0.15` by default. Control uses its pinned model version as the assignment version. `experiment_models_ready` indicates whether configured pins loaded. A missing or mismatched pin uses the verified default without a fulfilled exposure. Pin changes require a new experiment configuration and a worker startup. Promotions leave the configured pins in place.
+
+For a past recommendation, use `recommendation_serves.request_id` to find its actual `model_version` and route. Resolve that version through its immutable registration to the artifact digest and training metadata. The request log also includes its digest. For a daily model, trace the report's source and snapshot checksums to the corresponding retained run. For the original model, use the matching training sidecar. Historical serves with ambiguous labels or missing training records cannot be reconstructed from the registry alone.
+
+## Capacity and verification
+
+`ModelRegistry.snapshot()` captures the ready handles, default, pins, and acknowledgement. `refresh()` processes a single manifest. The worker's `watch()` applies it at startup and polls for changes.
+
+The registry assumes the default Dockerfile configuration of one Gunicorn worker with four threads. It stages one candidate at a time and caps live handles at five, including snapshots held by in-flight requests. Budget for the default, independently pinned Control and Treatment, the previous default, and a staged candidate, with duplicates sharing a handle. Measure peak RSS and temporary deserialization and warmup allocations under request load and concurrent updater activity. The count limit does not guarantee that those bundles fit in memory. The registry never evicts a configured pin. Keep sufficient disk space for immutable artifacts and training evidence. Disk retention is an operator responsibility.
+
+Run `python -m pytest src/tests/test_model_registry.py src/tests/test_experiment_api.py src/tests/test_daily_updates.py src/tests/test_promotion_wrapper.py` for offline coverage. The isolated Docker verification job exercises synthetic auto-promotion, retry, and rollback with continuous HTTP traffic. It writes `ci-model-traffic.json` with errors, latency, served versions, and container and worker identity. Before scheduling production updates, verify actual worker count, model memory and load time, filesystem permissions, disk space, and the public latency and availability probes. Confirm the rollout and activation contract with the deployment owner. PR CI does not access production.

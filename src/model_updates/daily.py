@@ -84,6 +84,8 @@ def run(day, artifacts, data_dir=DEFAULT_DATA, snapshot=None, min_users=100):
     report_path = run_dir / 'report.json'
     if report_path.exists():
         return json.loads(report_path.read_text())  # Date-keyed idempotence, no silent overwrites.
+    if (artifacts / 'promotion-pending.json').exists():
+        raise ValueError('Recover pending activation before evaluating a new champion')
     run_dir.mkdir(exist_ok=True)
     report = dict(day=day.isoformat(), status='failed', eligible_for_manual_promotion=False)
     try:
