@@ -1,5 +1,6 @@
 """Cold-start work queue interactions."""
 
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -15,7 +16,9 @@ from src.database.interactions._shared import (
 from src.database.models import ColdStartJob, utc_now
 from src.database.schemas import ColdStartJobCreate
 
-__all__ = ["enqueue", "get", "list_records", "claim", "retry", "complete"]
+__all__ = [
+    "enqueue", "enqueue_many", "get", "list_records", "claim", "retry", "complete",
+]
 
 ### ----------- Helper Functions -----------
 
@@ -29,6 +32,27 @@ def _enqueue(session: Session, data: ColdStartJobCreate) -> ColdStartJob:
     session.execute(statement.on_conflict_do_nothing(index_elements=["user_id"]))
     session.flush()
     return session.get(ColdStartJob, data.user_id)
+
+
+def _enqueue_many(session: Session, records: list[ColdStartJobCreate]) -> int:
+    if not records:
+        return 0
+    now = utc_now()
+    unique = {}
+    for record in records:
+        values = record.model_dump()
+        values["next_attempt_at"] = values["next_attempt_at"] or now
+        values["created_at"] = now
+        values["updated_at"] = now
+        unique.setdefault(record.user_id, values)
+    statement = dialect_insert(session, ColdStartJob).values(list(unique.values()))
+    result = session.execute(
+        statement.on_conflict_do_nothing(index_elements=["user_id"]).returning(
+            ColdStartJob.user_id
+        )
+    )
+    session.flush()
+    return len(result.scalars().all())
 
 
 def _get(session: Session, user_id: str) -> ColdStartJob | None:
@@ -128,6 +152,16 @@ def enqueue(
     """
     data = ColdStartJobCreate(**locals())
     return run(lambda session: _enqueue(session, data))
+
+
+def enqueue_many(
+    records: Iterable[ColdStartJobCreate | Mapping[str, object]],
+) -> int:
+    """Idempotently enqueue a batch of known users."""
+    validated = [ColdStartJobCreate.model_validate(record) for record in records]
+    if not validated:
+        return 0
+    return run(lambda session: _enqueue_many(session, validated))
 
 
 def get(user_id: str) -> ColdStartJob | None:

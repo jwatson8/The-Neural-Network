@@ -3,7 +3,7 @@
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from src.database.interactions._shared import (
     UNSET,
@@ -22,7 +22,10 @@ from src.database.interactions._shared import (
 from src.database.models import User
 from src.database.schemas import UserCreate, UserUpdate
 
-__all__ = ["create", "get", "update", "list_records", "create_missing_many"]
+__all__ = [
+    "create", "get", "update", "list_records", "create_missing_many",
+    "get_existing_ids",
+]
 
 
 ### ----------- Helper Functions -----------
@@ -44,6 +47,12 @@ def _list(session: Session, *, offset: int, limit: int) -> list[User]:
 
 def _create_missing_many(session: Session, records: list[UserCreate]) -> list[str]:
     return create_missing_records(session, User, records, "user_id")
+
+
+def _get_existing_ids(session: Session, user_ids: set[str]) -> set[str]:
+    if not user_ids:
+        return set()
+    return set(session.exec(select(User.user_id).where(User.user_id.in_(user_ids))).all())
 
 
 ### ----------- Individual Functions -----------
@@ -134,3 +143,11 @@ def create_missing_many(
     """Insert absent users atomically and return IDs left unchanged."""
     validated = [UserCreate.model_validate(record) for record in records]
     return run(lambda session: _create_missing_many(session, validated))
+
+
+def get_existing_ids(user_ids: Iterable[str]) -> set[str]:
+    """Return the supplied user identifiers that currently exist."""
+    normalized = {user_id for user_id in user_ids if isinstance(user_id, str)}
+    if not normalized:
+        return set()
+    return run(lambda session: _get_existing_ids(session, normalized))

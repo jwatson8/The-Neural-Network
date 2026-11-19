@@ -3,7 +3,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlmodel import Session
+from collections.abc import Iterable
+
+from sqlmodel import Session, select
 
 from src.database.interactions import cold_start_jobs
 from src.database.interactions._shared import (
@@ -17,7 +19,9 @@ from src.database.interactions._shared import (
 from src.database.models import ColdStartProfile, utc_now
 from src.database.schemas import ColdStartProfileReplace
 
-__all__ = ["replace", "get", "list_records", "complete_generation"]
+__all__ = [
+    "replace", "get", "list_records", "complete_generation", "get_existing_user_ids",
+]
 
 ### ----------- Helper Functions -----------
 
@@ -48,6 +52,15 @@ def _get(session: Session, user_id: str) -> ColdStartProfile | None:
 
 def _list(session: Session, *, offset: int, limit: int) -> list[ColdStartProfile]:
     return list_model_records(session, ColdStartProfile, offset=offset, limit=limit)
+
+
+def _get_existing_user_ids(session: Session, user_ids: set[str]) -> set[str]:
+    if not user_ids:
+        return set()
+    statement = select(ColdStartProfile.user_id).where(
+        ColdStartProfile.user_id.in_(user_ids)
+    )
+    return set(session.exec(statement).all())
 
 
 ### ----------- Individual Functions -----------
@@ -82,6 +95,14 @@ def get(user_id: str) -> ColdStartProfile | None:
 def list_records(*, offset: int = 0, limit: int = 100) -> list[ColdStartProfile]:
     """Return profiles using zero-based ``offset`` and capped ``limit``."""
     return run(lambda session: _list(session, offset=offset, limit=limit))
+
+
+def get_existing_user_ids(user_ids: Iterable[str]) -> set[str]:
+    """Return supplied user identifiers that already have saved profiles."""
+    normalized = {user_id for user_id in user_ids if isinstance(user_id, str)}
+    if not normalized:
+        return set()
+    return run(lambda session: _get_existing_user_ids(session, normalized))
 
 
 def complete_generation(

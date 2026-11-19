@@ -219,21 +219,19 @@ def create_app(
         if default is None or app.extensions.get('recommendation_model', True) is None:
             return jsonify(error='Service Unavailable', message='Model unavailable'), 503
 
+        users.create_missing_many([{'user_id': user_id}])
+
         history_rows = user_movie_history.get_user_history(user_id)
         excluded_movie_ids = {str(row.movie_id) for row in history_rows}
         context = ServingRequest(user_id=user_id, exclude_movie_ids=frozenset(excluded_movie_ids),
                                  has_history=bool(history_rows))
         decision = None
         experiment_reason = 'disabled'
-        user_ensured = False
         if enabled and app.config['EXPERIMENTS_ENABLED'] is True:
             try:
                 eligible = eligibility(context)
                 if not isinstance(eligible, bool):
                     raise ValueError('experiment eligibility must return a boolean')
-                if eligible:
-                    users.create_missing_many([{'user_id': user_id}])
-                    user_ensured = True
                 decision = manager.decide(experiment_id=experiment_id, user_id=user_id,
                                           eligible=eligible, now=request_received_at)
                 experiment_reason = decision.reason.value
@@ -315,8 +313,6 @@ def create_app(
             return jsonify(error='Internal Server Error', message='Recommendation generation failed'), 500
         movie_ids = [item.movie_id for item in response_items]
 
-        if not user_ensured:
-            users.create_missing_many([{'user_id': user_id}])
         response = Response(response_body, status=200, mimetype='text/plain')
         request_id = uuid4()
         exposure = {}

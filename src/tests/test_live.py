@@ -11,6 +11,7 @@ from sqlmodel import SQLModel, create_engine
 
 from deployment.traffic_report import iter_course_lines, summarize
 from src.database.interactions import (
+    cold_start_jobs,
     cold_start_profiles,
     course_requests,
     data_quality_logs,
@@ -23,7 +24,7 @@ from src.database.interactions import (
     users,
 )
 from src.service.cold_start import recommend_cold_start
-from src.service.course_stream import handle_line, main
+from src.service.course_stream import _lag, _process_records, handle_line, main
 from src.service.profile_worker import (
     PreferenceProfile,
     fetch_descriptions,
@@ -113,6 +114,7 @@ class LiveTests(unittest.TestCase):
         claim.assert_called_once_with(lease_seconds=360)
 
     def test_watch_and_rating_rows_are_persisted_and_derive_history(self):
+        users.create(user_id="501")
         movies.create(movie_id="live-movie", title="Live movie")
         watch = handle_line(
             self.store, "topic", 0, 10,
@@ -165,7 +167,15 @@ class LiveTests(unittest.TestCase):
         ), patch("src.service.course_stream.KafkaConsumer", return_value=consumer), patch(
             "src.service.course_stream.ProfileStore"
         ) as store_factory, patch("src.service.course_stream.logger.info") as log_info:
-            store_factory.return_value.record_movie_event.return_value = (True, [])
+            store_factory.return_value.record_batch.return_value = {
+                "counts": {
+                    "account": 0, "recommendation": 0, "watch": 1, "rating": 1,
+                },
+                "inserted": 2,
+                "duplicates": 0,
+                "errors": [],
+                "rejected_count": 0,
+            }
             with self.assertRaisesRegex(RuntimeError, "stop"):
                 main()
 
@@ -176,7 +186,117 @@ class LiveTests(unittest.TestCase):
             args for args in activity_logs if args[0].startswith("course_events")
         )
         self.assertIn("watches=%d ratings=%d", event_log[0])
-        self.assertEqual(event_log[3:5], (1, 1))
+        self.assertEqual(event_log[6:8], (1, 1))
+
+    def test_consumer_does_not_commit_when_batch_persistence_fails(self):
+        record = SimpleNamespace(
+            topic="topic", partition=0, offset=10,
+            value=b"2026-10-11T12:00:00Z,501,GET /data/m/live-movie/0.mpg",
+        )
+        consumer = SimpleNamespace(
+            poll=Mock(return_value={("topic", 0): [record]}),
+            commit=Mock(), close=Mock(),
+        )
+        with patch.dict(os.environ, {
+            "KAFKA_BOOTSTRAP_SERVERS": "localhost:9092",
+            "KAFKA_TOPIC": "topic",
+            "KAFKA_GROUP_ID": "test-group",
+        }), patch(
+            "src.service.course_stream.KafkaConsumer", return_value=consumer
+        ), patch("src.service.course_stream.ProfileStore") as store_factory:
+            store_factory.return_value.record_batch.side_effect = SQLAlchemyError("outage")
+            with self.assertRaises(SQLAlchemyError):
+                main()
+
+        consumer.commit.assert_not_called()
+        consumer.close.assert_called_once_with()
+
+    def test_consumer_lag_sums_partitions_and_reports_largest(self):
+        partitions = ("partition-0", "partition-1")
+        consumer = SimpleNamespace(
+            assignment=Mock(return_value=partitions),
+            end_offsets=Mock(return_value={partitions[0]: 150, partitions[1]: 80}),
+            position=Mock(side_effect=[100, 70]),
+        )
+
+        self.assertEqual(_lag(consumer), (60, 50))
+
+    def test_movie_ids_are_exact_catalog_keys_not_title_slugs(self):
+        users.create(user_id="501")
+        identifiers = (
+            "10_000+bc+2008",
+            "mr.++mrs.+smith+2005",
+            "m*a*s*h+1970",
+        )
+        movies.create_missing_many(
+            {"movie_id": movie_id, "title": movie_id} for movie_id in identifiers
+        )
+
+        for offset, movie_id in enumerate(identifiers):
+            result = handle_line(
+                self.store, "topic", 0, 100 + offset,
+                f"2026-10-11T12:00:00Z,501,GET /data/m/{movie_id}/0.mpg",
+            )
+            self.assertEqual(result, "watch")
+
+        stored_ids = {event.movie_id for event in stream_events.list_records(limit=10)}
+        self.assertEqual(stored_ids, set(identifiers))
+
+    def test_watch_event_creates_minimal_user_without_profile_job(self):
+        movies.create(movie_id="live-movie", title="Live movie")
+
+        result = handle_line(
+            self.store, "topic", 0, 55,
+            "2026-10-11T12:00:00Z,912309123123,GET /data/m/live-movie/0.mpg",
+        )
+
+        self.assertEqual(result, "watch")
+        self.assertIn("912309123123", users.get_existing_ids(["912309123123"]))
+        self.assertIsNone(cold_start_jobs.get("912309123123"))
+        self.assertEqual(len(stream_events.list_records()), 1)
+
+    def test_nonnumeric_stream_user_is_rejected_before_persistence(self):
+        movies.create(movie_id="live-movie", title="Live movie")
+
+        result = handle_line(
+            self.store, "topic", 0, 56,
+            "2026-10-11T12:00:00Z,91230912i3123,GET /data/m/live-movie/0.mpg",
+        )
+
+        self.assertEqual(result, "invalid")
+        self.assertIsNone(users.get("91230912i3123"))
+        self.assertEqual(stream_events.list_records(), [])
+
+    def test_mixed_poll_batches_account_watch_job_and_validation_log(self):
+        movies.create(movie_id="live-movie", title="Live movie")
+        records = [
+            SimpleNamespace(
+                topic="topic", partition=0, offset=1,
+                value=b"2026-10-11T12:00:00Z,501,GET /create_account",
+            ),
+            SimpleNamespace(
+                topic="topic", partition=0, offset=2,
+                value=b"2026-10-11T12:01:00Z,501,GET /data/m/live-movie/0.mpg",
+            ),
+            SimpleNamespace(
+                topic="topic", partition=0, offset=3,
+                value=b"bad-time,501,GET /data/m/live-movie/1.mpg",
+            ),
+            SimpleNamespace(
+                topic="topic", partition=0, offset=4,
+                value=b"bad-time,501,GET /rate/live-movie=8",
+            ),
+        ]
+
+        counts, inserted, duplicates = _process_records(self.store, records)
+
+        self.assertEqual((counts["account"], counts["watch"], counts["invalid"]), (1, 1, 2))
+        self.assertEqual((inserted, duplicates), (2, 0))
+        self.assertIsNotNone(users.get("501"))
+        self.assertIsNotNone(cold_start_jobs.get("501"))
+        logs = data_quality_logs.list_records()
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(logs[0].log_metadata["rejected_record_count"], 2)
 
     def test_unknown_movie_stream_event_is_logged_and_not_persisted(self):
         result = handle_line(
@@ -186,6 +306,7 @@ class LiveTests(unittest.TestCase):
 
         self.assertEqual(result, "invalid")
         self.assertEqual(stream_events.list_records(), [])
+        self.assertIsNone(users.get("501"))
         logs = data_quality_logs.search(source="kafka", limit=10).records
         self.assertEqual(len(logs), 1)
         self.assertNotIn("missing-movie", str(logs[0].error_details))

@@ -681,6 +681,22 @@ class DatabaseInteractionTests(unittest.TestCase):
             1,
         )
 
+    def test_course_requests_and_cold_start_jobs_support_replay_safe_batches(self):
+        requests = [
+            {
+                "topic": "course-logs", "partition_id": 0, "offset_id": offset,
+                "raw_line": f"line-{offset}",
+            }
+            for offset in range(3)
+        ]
+        self.assertEqual(course_requests.create_many(requests), 3)
+        self.assertEqual(course_requests.create_many(requests), 0)
+
+        users.create_missing_many([{"user_id": "batch-a"}, {"user_id": "batch-b"}])
+        jobs = [{"user_id": "batch-a"}, {"user_id": "batch-b"}]
+        self.assertEqual(cold_start_jobs.enqueue_many(jobs), 2)
+        self.assertEqual(cold_start_jobs.enqueue_many(jobs), 0)
+
     def test_database_summary_counts_all_tables(self):
         self.seed_catalog()
         counts = database_summary.counts()
