@@ -56,7 +56,7 @@ def _parse_line(topic, partition, offset, line):
     rate = RATE_RE.fullmatch(event)
     account = re.fullmatch(r"GET /create_account/?(?:\s+HTTP/\S+)?", event)
     recommendation = event.startswith("recommendation request ")
-    if (watch or rate or account or recommendation) and not _valid_user_id(user_id):
+    if (watch or rate or account) and not _valid_user_id(user_id):
         return {
             "kind": "invalid",
             "errors": [_error("user_id", "User identifier must contain ASCII digits")],
