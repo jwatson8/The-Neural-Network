@@ -28,12 +28,12 @@ def record(report, phase, outcome):
     if phase not in ('comparison', 'deployment'):
         raise ValueError('Unknown audit phase')
     identity = ':'.join(('daily-update', report['day'], report.get('champion_sha256', ''),
-                         report.get('candidate_sha256', ''), phase, outcome))
+                         report.get('candidate_sha256', ''), phase, outcome, report.get('attempt_id', '')))
     log_id = uuid5(NAMESPACE_URL, identity)
     payload = {key: report[key] for key in (
         'day', 'status', 'test_start', 'test_end', 'champion_sha256', 'candidate_sha256',
         'snapshot_sha256', 'source_sha256', 'git_commit_sha', 'training_data_snapshot',
-        'training_source_sha256', 'libraries', 'counts', 'comparison', 'drift', 'reasons',
+        'training_source_sha256', 'libraries', 'snapshot_sampling', 'counts', 'comparison', 'drift', 'reasons',
         'reason', 'note', 'error_type', 'candidate_training_seconds', 'candidate_bytes',
         'monitoring_context', 'production') if key in report}
     payload.update(policy=POLICY, outcome=outcome,

@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import time
 from zoneinfo import ZoneInfo
+from uuid import uuid4
 
 import joblib
 import numpy as np
@@ -78,17 +79,24 @@ def merge_catalog(original, fresh, key):
     return result
 
 
-def run(day, artifacts, data_dir=DEFAULT_DATA, snapshot=None, min_users=100):
+def run(day, artifacts, data_dir=DEFAULT_DATA, snapshot=None, min_users=100, retry_failed=False):
     artifacts = Path(artifacts)
     run_dir = artifacts / 'daily' / day.isoformat()
     run_dir.parent.mkdir(parents=True, exist_ok=True)
     report_path = run_dir / 'report.json'
     if report_path.exists():
-        return json.loads(report_path.read_text())  # Date-keyed idempotence, no silent overwrites.
+        previous = json.loads(report_path.read_text())
+        if not retry_failed or previous.get('status') != 'failed':
+            return previous  # Completed decisions are immutable, even when retained.
+        if (run_dir / 'promotion.json').exists() or (artifacts / 'promotion-pending.json').exists():
+            raise ValueError('Cannot retry a failed run with a promotion transaction')
+        archived = artifacts / 'failed-attempts'
+        archived.mkdir(exist_ok=True)
+        run_dir.rename(archived / (day.isoformat() + '-' + uuid4().hex))
     if (artifacts / 'promotion-pending.json').exists():
         raise ValueError('Recover pending activation before evaluating a new champion')
     run_dir.mkdir(exist_ok=True)
-    report = dict(day=day.isoformat(), status='failed', eligible_for_manual_promotion=False)
+    report = dict(day=day.isoformat(), attempt_id=uuid4().hex, status='failed', eligible_for_manual_promotion=False)
     try:
         report['stage'] = 'verify_champion_provenance'
         start, end = window(day)
@@ -124,6 +132,7 @@ def run(day, artifacts, data_dir=DEFAULT_DATA, snapshot=None, min_users=100):
             event_filter=f'event_time < {end.isoformat()}',
             metadata_policy='Original metadata overlaid with captured PostgreSQL records',
             deduplication='normalize_events: exact normalized event fields',
+            sampling=snapshot.get('sampling', {'selection': 'provided snapshot'}),
         )
         report['source_sha256'] = hashlib.sha256(b''.join(
             p.read_bytes() for p in sorted(Path(__file__).parents[1].rglob('*.py')))).hexdigest()
@@ -140,6 +149,9 @@ def run(day, artifacts, data_dir=DEFAULT_DATA, snapshot=None, min_users=100):
         heldout = [e for e in events if start <= utc(e['timestamp']) < end]
         fresh = [e for e in normalize_events(snapshot['events']) if start <= utc(e['timestamp']) < end]
         report['production'] = production_report(snapshot, start, end)
+        report['snapshot_sampling'] = snapshot.get('sampling')
+        if snapshot.get('sampling'):
+            report['production']['scope'] = 'Bounded snapshot; counts and costs are not full-day totals. Use monitoring_runs for production reporting.'
         report['monitoring_context'] = monitoring_context(snapshot)
         report['policy'] = POLICY
         report['counts'] = dict(history=len(history), heldout=len(heldout), fresh_day_events=len(fresh))
@@ -204,9 +216,10 @@ def main():
     parser.add_argument('--artifacts', type=Path, default=Path('/artifacts'))
     parser.add_argument('--data', type=Path, default=Path('/app/data'))
     parser.add_argument('--min-users', type=int, default=100)
+    parser.add_argument('--retry-failed', action='store_true', help='Archive a failed attempt before retrying; never replace a completed decision')
     args = parser.parse_args()
     try:
-        result = run(args.day, args.artifacts, args.data, min_users=args.min_users)
+        result = run(args.day, args.artifacts, args.data, min_users=args.min_users, retry_failed=args.retry_failed)
     except Exception as error:
         print(json.dumps({'status': 'failed', 'error_type': type(error).__name__,
                           'report': str(args.artifacts / 'daily' / str(args.day) / 'report.json')}))

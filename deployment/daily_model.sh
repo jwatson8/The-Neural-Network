@@ -38,7 +38,7 @@ if [[ "$action" == register-champion ]]; then
   exit
 fi
 if [[ "$action" == auto ]]; then
-  if ! tool -m src.model_updates.daily --day "$day"; then
+  if ! tool -m src.model_updates.daily --day "$day" --retry-failed; then
     tool -m src.model_updates.automatic decide "$day" || true
     exit 1
   fi
