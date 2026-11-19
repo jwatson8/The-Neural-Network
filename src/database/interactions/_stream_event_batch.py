@@ -23,12 +23,13 @@ def materialize_many(session: Session, events: list[StreamEvent]) -> None:
     }
     history_rows = []
     if history_pairs:
-        user_ids = {user_id for user_id, _ in history_pairs}
-        movie_ids = {movie_id for _, movie_id in history_pairs}
+        from sqlalchemy import tuple_
+
         history_rows = session.exec(
             select(UserMovieHistory).where(
-                UserMovieHistory.user_id.in_(user_ids),
-                UserMovieHistory.movie_id.in_(movie_ids),
+                tuple_(
+                    UserMovieHistory.user_id, UserMovieHistory.movie_id
+                ).in_(history_pairs)
             )
         ).all()
     states = {
