@@ -38,6 +38,7 @@ class ServingResult:
     fulfilled: bool = False
     policy_version: str | None = None
     underlying_route: str | None = None
+    model_sha256: str | None = None
 
 
 class TreatmentServer(Protocol):
@@ -90,24 +91,34 @@ class RecommendationRouter:
     def serve(
         self, request: ServingRequest, decision: ExperimentDecision | None,
         control: Callable[[], ServingResult],
+        *,
+        assigned_control: Callable[[], ServingResult] | None = None,
+        control_available: bool = True,
+        treatment_available: bool = True,
     ) -> ServingResult:
         """Use legacy control, or a fulfilled Treatment; otherwise fall back explicitly.
 
         Control inference errors propagate unchanged. Treatment errors or invalid
         results use normal serving and never constitute an experiment exposure.
-        The callback is invoked at most once, and no audit record is written here.
+        Only one Control callback is used, and no audit record is written here.
         """
         if decision is None or not decision.assigned:
             return replace(control(), fulfilled=False)
         if decision.variant == "control":
-            result = control()
+            if not control_available:
+                result = control()
+                fallback = ":".join(filter(None, ("control_model_unavailable", result.fallback_path)))
+                return replace(result, fulfilled=False, fallback_path=fallback)
+            result = (assigned_control or control)()
             fulfilled = _matches(result, decision)
             fallback = result.fallback_path
             if not fulfilled:
                 fallback = ":".join(filter(None, ("unfulfilled_control", fallback)))
             return replace(result, fulfilled=fulfilled, fallback_path=fallback)
         reason = "unsupported_treatment"
-        if decision.variant == "treatment" and self.treatment is not None:
+        if not treatment_available:
+            reason = "treatment_model_unavailable"
+        elif decision.variant == "treatment" and self.treatment is not None:
             try:
                 result = self.treatment(request, decision)
                 if _valid_treatment(result, request, decision):

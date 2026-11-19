@@ -17,7 +17,7 @@ from src.database.models import User, Movie, StreamEvent
 from src.model.recommender import fit
 from src.model_updates.daily import run, digest, model_cutoff
 from src.model_updates.evaluation import scores, compare, production_report, rank, FrozenProfiles
-from src.model_updates.promotion import stage, finish
+from src.model_updates.promotion import finish, request_rollback, stage
 from src.model_updates.scheduler import due_day
 from src.model_updates.snapshot import window, normalize_events, capture
 from src.tests.test_service import make_model
@@ -156,9 +156,11 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(training.call_args_list[0].args[0]), 2)
         self.assertEqual(len(training.call_args_list[1].args[0]), 3)
         self.assertEqual(joblib.load(self.root/'model.joblib')['update_metadata']['version'], 'baseline')
-        stage(self.root, self.day)
+        request = stage(self.root, self.day)
+        finish(self.root, self.day, request['activation_id'], request['sha256'])
         self.assertEqual(joblib.load(self.root/'model.joblib')['update_metadata']['version'], 'daily-2026-01-03')
-        finish(self.root, self.day, rollback=True)
+        rollback = request_rollback(self.root, self.day)
+        finish(self.root, self.day, rollback['activation_id'], rollback['sha256'], rollback=True)
         self.assertEqual(joblib.load(self.root/'model.joblib')['update_metadata']['version'], 'baseline')
 
     def test_insufficient_ratings_never_creates_promotable_artifact(self):
@@ -195,6 +197,14 @@ class PipelineTests(unittest.TestCase):
             champion_sha256=digest(self.root/'model.joblib'), candidate_sha256=digest(folder/'candidate.joblib'))))
         return folder
 
+    def test_pending_activation_defers_new_evaluation_without_writing_a_report(self):
+        self.promotion_fixture()
+        stage(self.root, self.day)
+        next_day = self.day + timedelta(days=1)
+        with self.assertRaisesRegex(ValueError, 'Recover pending activation'):
+            run(next_day, self.root, self.data, self.snapshot)
+        self.assertFalse((self.root / 'daily' / next_day.isoformat() / 'report.json').exists())
+
     def test_changed_champion_or_candidate_prevents_promotion(self):
         folder = self.promotion_fixture()
         with (folder/'candidate.joblib').open('ab') as stream:
@@ -210,9 +220,11 @@ class PipelineTests(unittest.TestCase):
     def test_completed_promotion_can_be_rolled_back_and_pending_blocks_second_stage(self):
         self.promotion_fixture()
         old = digest(self.root/'model.joblib')
-        stage(self.root, self.day)
+        request = stage(self.root, self.day)
         with self.assertRaises(ValueError):
             stage(self.root, self.day)
-        finish(self.root, self.day)
-        finish(self.root, self.day, rollback=True)
+        self.assertEqual(digest(self.root/'model.joblib'), old)
+        finish(self.root, self.day, request['activation_id'], request['sha256'])
+        rollback = request_rollback(self.root, self.day)
+        finish(self.root, self.day, rollback['activation_id'], rollback['sha256'], rollback=True)
         self.assertEqual(digest(self.root/'model.joblib'), old)

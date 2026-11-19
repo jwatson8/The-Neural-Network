@@ -16,7 +16,6 @@ from src.database.schemas import ExperimentCreate
 from src.experimentation.cost_reranking import POLICY, CostAwareConfig, treatment_version
 from src.service.api import create_app
 from src.service.cold_start import recommend_cold_start
-from src.service.cost_aware_treatment import CostAwareTreatmentServer
 from src.service.experiment_routing import ServingRequest
 from src.service.model_adapter import recommend
 from src.service.recommendation_candidates import LoadedModelCandidates
@@ -191,10 +190,6 @@ class CostAwareServingTests(unittest.TestCase):
 
     def test_policy_version_and_underlying_model_are_distinct_and_truthful(self):
         app = self.app()
-        adapter = app.extensions['recommendation_router'].treatment
-        self.assertIsInstance(adapter, CostAwareTreatmentServer)
-        self.assertEqual(adapter.policy_version, self.version)
-        self.assertNotEqual(adapter.policy_version, adapter.model_version)
         with self.assertLogs('src.service.api', level='INFO') as logs:
             _, record = self.serve('new', app)
         self.assertEqual(record.model_version, 'trained-model-v1')

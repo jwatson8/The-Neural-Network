@@ -9,7 +9,7 @@ from src.experimentation.cost_reranking import (
 )
 from src.experimentation.decisions import ExperimentDecision
 from src.service.experiment_routing import ServingRequest, ServingResult
-from src.service.recommendation_candidates import CandidateSource
+from src.service.recommendation_candidates import CandidateSource, LoadedModelCandidates
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,13 @@ class CostAwareTreatmentServer:
     model_version: str
     config: CostAwareConfig = CostAwareConfig()
     catalog_lookup: Callable[[tuple[str, ...]], Mapping[str, object]] | None = None
+
+    model_sha256: str | None = None
+
+    @classmethod
+    def for_model(cls, handle, store, config):
+        return cls(LoadedModelCandidates(handle.bundle, store), handle.version, config,
+                   model_sha256=handle.sha256)
 
     @property
     def policy_version(self) -> str:
@@ -41,5 +48,5 @@ class CostAwareTreatmentServer:
             recommendations=tuple(item.movie_id for item in result.selected),
             model_version=self.model_version, model_route=f'cost_aware:{pool.route}',
             policy=POLICY, fulfilled=True, policy_version=self.policy_version,
-            underlying_route=pool.route,
+            underlying_route=pool.route, model_sha256=self.model_sha256,
         )

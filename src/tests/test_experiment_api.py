@@ -2,9 +2,13 @@
 
 import unittest
 from dataclasses import replace
+from decimal import Decimal
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from threading import Event, Thread
 from unittest.mock import Mock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import event, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -16,11 +20,15 @@ from src.database.interactions import (
     stream_events, users,
 )
 from src.database.schemas import ExperimentCreate
+from src.experimentation.assignment import assigned_variant
+from src.experimentation.cost_reranking import POLICY, CostAwareConfig, treatment_version
 from src.experimentation.decisions import DecisionReason, ExperimentDecision
 from src.experimentation.manager import ExperimentManager
 from src.service.api import create_app
 from src.service.experiment_routing import ServingResult
+from src.service.model_adapter import recommend
 from src.service.store import ProfileStore
+from src.tests.test_model_registry import activate, install, write_bundle
 from src.tests.test_service import make_model
 
 
@@ -383,3 +391,83 @@ class ExperimentApiTests(unittest.TestCase):
         self.assert_plain(response)
         self.assertEqual(self.audit().model_version, 'unknown')
         self.assertIsNone(self.audit().experiment_assignment_id)
+
+    def test_pinned_bundles_and_default_switch_keep_request_provenance(self):
+        experiment = self.experiment(
+            experiment_id=UUID(int=4), control_version='A', treatment_allocation='0.5',
+            treatment_policy=POLICY, treatment_version=treatment_version('B', CostAwareConfig()),
+        )
+        self.assertEqual(assigned_variant(experiment.experiment_id, 'warm', Decimal('.5')), 'treatment')
+        self.assertEqual(assigned_variant(experiment.experiment_id, 'other', Decimal('.5')), 'control')
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            live = root / 'model.joblib'
+            write_bundle(live, 'A')
+            install(root, 'A')
+            install(root, 'B', 1)
+            candidate = install(root, 'C', 2)
+            settings = dict(
+                MODEL_PATH=str(live), EXPERIMENT_ID=str(experiment.experiment_id),
+                EXPERIMENTS_ENABLED=True, COST_AWARE_TREATMENT_ENABLED=True,
+                CONTROL_MODEL_VERSION='A', TREATMENT_MODEL_VERSION='B',
+            )
+            app = create_app(profile_store=self.store, config=settings,
+                             experiment_eligibility=lambda context: context.user_id != 'outside')
+            registry = app.extensions['model_registry']
+            entered, release = Event(), Event()
+
+            def hold(bundle, user_id, **kwargs):
+                if user_id == 'outside' and not release.is_set():
+                    entered.set()
+                    assert release.wait(5)
+                return recommend(bundle, user_id, **kwargs)
+
+            statuses = []
+
+            def request_default():
+                statuses.append(app.test_client().get('/recommend/outside').status_code)
+
+            with patch('src.service.api.recommend', side_effect=hold), patch.object(
+                    movies, 'get_license_costs', side_effect=lambda ids: dict.fromkeys(ids, '1.00')):
+                before_control = app.test_client().get('/recommend/other')
+                before_treatment = app.test_client().get('/recommend/warm')
+                self.assertNotIn('movie-1', before_treatment.get_data(as_text=True).split(','))
+                self.assertIn('movie-0', before_treatment.get_data(as_text=True).split(','))
+                worker = Thread(target=request_default)
+                worker.start()
+                try:
+                    self.assertTrue(entered.wait(5))
+                    request = activate(root, registry, 'C', candidate)
+                    health = app.test_client().get('/health').json
+                    self.assertEqual(health['activation_id'], request['activation_id'])
+                    self.assertEqual(health['model_sha256'], candidate)
+                finally:
+                    release.set()
+                    worker.join(5)
+                self.assertEqual(statuses, [200])
+                self.assertEqual(app.test_client().get('/recommend/outside').status_code, 200)
+                after_control = app.test_client().get('/recommend/other')
+                after_treatment = app.test_client().get('/recommend/warm')
+                self.assertEqual(before_control.data, after_control.data)
+                self.assertEqual(before_treatment.data, after_treatment.data)
+
+            records = recommendation_serves.list_records()
+            self.assertEqual(len(records), 6)
+            for user, version in (('other', 'A'), ('warm', 'B')):
+                arm = [row for row in records if row.user_id == user]
+                self.assertEqual(len(arm), 2)
+                self.assertEqual({row.model_version for row in arm}, {version})
+                self.assertIsNotNone(arm[0].experiment_assignment_id)
+                self.assertEqual(arm[0].experiment_assignment_id, arm[1].experiment_assignment_id)
+            self.assertEqual({row.model_version for row in records if row.user_id == 'outside'}, {'A', 'C'})
+            self.assertTrue(all(row.experiment_assignment_id is None for row in records if row.user_id == 'outside'))
+            self.assertTrue(all(row.model_route.startswith('cost_aware:') for row in records if row.user_id == 'warm'))
+
+            app = create_app(profile_store=self.store, config=settings | {'TREATMENT_MODEL_VERSION': 'missing'})
+            fallback = app.test_client().get('/recommend/warm')
+            self.assertEqual(fallback.status_code, 200)
+            records = recommendation_serves.list_records()
+            self.assertEqual(len(records), 7)
+            fallback_record, = [row for row in records if row.user_id == 'warm' and row.experiment_assignment_id is None]
+            self.assertEqual(fallback_record.model_version, 'A')
