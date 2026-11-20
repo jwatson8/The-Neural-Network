@@ -175,7 +175,7 @@ def _consumer_options():
         group_id=os.environ["KAFKA_GROUP_ID"], enable_auto_commit=False,
         auto_offset_reset="latest",
         security_protocol=os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"),
-        max_poll_records=int(os.getenv("KAFKA_MAX_POLL_RECORDS", "200")),
+        max_poll_records=int(os.getenv("KAFKA_MAX_POLL_RECORDS", "1000")),
     )
     for env, name in (
         ("KAFKA_SASL_MECHANISM", "sasl_mechanism"),
