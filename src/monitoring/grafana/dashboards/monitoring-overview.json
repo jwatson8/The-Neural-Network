@@ -177,9 +177,9 @@
     },
     {
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
-      "description": "Monitoring worker exceptions grouped into five-minute buckets. Any recorded failure triggers an alert.",
+      "description": "Monitoring worker exceptions grouped into five-minute buckets. Two exceptions within 10 minutes trigger an alert.",
       "fieldConfig": {
-        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"thresholdsStyle": {"mode": "line"}}, "mappings": [], "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "unit": "short"},
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"thresholdsStyle": {"mode": "line"}}, "mappings": [], "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 2}]}, "unit": "short"},
         "overrides": []
       },
       "gridPos": {"h": 7, "w": 16, "x": 8, "y": 24},

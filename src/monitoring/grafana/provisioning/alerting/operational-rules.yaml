@@ -95,7 +95,7 @@ groups:
             datasourceUid: __expr__
             model:
               conditions:
-                - evaluator: {params: [0], type: gt}
+                - evaluator: {params: [1], type: gt}
                   operator: {type: and}
                   query: {params: [C]}
                   reducer: {params: [], type: last}
@@ -112,8 +112,8 @@ groups:
         execErrState: Alerting
         for: 0s
         annotations:
-          summary: A monitoring workload failure was recorded
-          description: At least one monitoring worker exception occurred in the last 10 minutes.
+          summary: Multiple monitoring workload failures were recorded
+          description: At least two monitoring worker exceptions occurred in the last 10 minutes.
           __dashboardUid__: monitoring-overview
           __panelId__: "7"
         labels: {service: monitoring, severity: warning}
