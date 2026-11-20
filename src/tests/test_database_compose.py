@@ -21,6 +21,7 @@ class DatabaseComposeTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".env") as env_file:
             result = subprocess.run(["docker", "compose", "--env-file", env_file.name,
                 "--file", str(ROOT / "compose.yaml"), "--profile", "live", "--profile", "monitoring",
+                "--profile", "bootstrap",
                 "config", "--format", "json"], env=dict(os.environ, POSTGRES_PASSWORD="compose-test-only"),
                 capture_output=True, text=True, timeout=30)
         if result.returncode:
@@ -37,7 +38,7 @@ class DatabaseComposeTests(unittest.TestCase):
                          "service_completed_successfully")
 
     def test_api_and_database_workers_are_gated_by_migration_success(self):
-        graph = {"database-roll-up": "database-init", "api": "database-roll-up",
+        graph = {"database-roll-up": "database-init", "api": "database-init",
                  "daily-model-updater": "database-init", "monitoring-worker": "database-init",
                  "grafana-database-init": "database-init"}
         for service, dependency in graph.items():
@@ -45,3 +46,7 @@ class DatabaseComposeTests(unittest.TestCase):
                 self.assertEqual(self.services[service]["depends_on"][dependency]["condition"],
                                  "service_completed_successfully")
         self.assertEqual(self.services["database-init"]["command"], ["python", "-m", "src.database.initialize"])
+
+    def test_fixed_data_roll_up_is_an_explicit_bootstrap_operation(self):
+        self.assertEqual(self.services["database-roll-up"]["profiles"], ["bootstrap"])
+        self.assertNotIn("database-roll-up", self.services["api"]["depends_on"])

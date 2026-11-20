@@ -85,11 +85,20 @@ profiles/jobs in the legacy SQLite volume are not imported; the checked-in seed
 profiles are loaded into PostgreSQL on API startup. Do not delete the PostgreSQL
 volume or run old and new APIs on the same port.
 
-Normal Compose startup creates the schema, runs the idempotent CSV roll-up for users,
-movies, source events, and user/movie history, then starts the API. Recommendation
-audits and queued jobs are written by API requests; generated profiles and LLM usage
-require worker activity; Kafka request evidence and account events require Kafka
-traffic. Those event-driven tables are expected to start empty on a fresh deployment.
+Normal Compose startup applies migrations, initializes the schema, and starts the API.
+It intentionally skips the fixed Milestone 0 CSV roll-up so routine deployments do
+not reread the same source data. For a new empty database, or when intentionally
+reimporting that fixed data, run this once before enabling the live workers:
+
+```sh
+sudo docker compose --profile bootstrap run --rm -T database-roll-up
+```
+
+The roll-up is idempotent, so rerunning it is safe when a rebuild is actually needed.
+Recommendation audits and queued jobs are written by API requests; generated profiles
+and LLM usage require worker activity; Kafka request evidence and account events
+require Kafka traffic. Those event-driven tables are expected to start empty on a
+fresh deployment.
 
 From Windows PowerShell outside SSH, verify external reachability:
 
