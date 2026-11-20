@@ -83,7 +83,9 @@ services:
     <<: *service
     profiles: [monitoring]
     command: [python, -m, src.monitoring.monitoring_worker]
-    environment: *database-connection
+    environment:
+      <<: *database-connection
+      HEALTHCHECKS_MONITORING_URL: ${HEALTHCHECKS_MONITORING_URL:-}
     depends_on:
       database-init: {condition: service_completed_successfully}
 
