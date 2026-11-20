@@ -1,0 +1,57 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "One bar means the monitoring worker successfully persisted a batch during that five-minute interval. A missing bar means no successful persisted run was observed.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"fixedColor": "green", "mode": "fixed"},
+          "custom": {
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "spanNulls": false
+          },
+          "max": 1,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
+      "id": 1,
+      "options": {
+        "legend": {"displayMode": "hidden", "placement": "bottom", "showLegend": false},
+        "tooltip": {"mode": "single", "sort": "none"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(generated_at, '5m'), MAX(1)::double precision AS \"Successful worker run\" FROM monitoring_runs WHERE $__timeFilter(generated_at) GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Five-Minute Worker Heartbeat",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 42,
+  "tags": ["monitoring", "worker", "heartbeat"],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Monitoring Worker",
+  "uid": "monitoring-worker",
+  "version": 1
+}
