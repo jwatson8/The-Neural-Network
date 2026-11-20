@@ -65,10 +65,25 @@ depends on confirming its identity/field contract. No service activation is impl
 until real connections and credentials are configured. Empty descriptions
 deliberately use popularity.
 
-`KAFKA_MAX_POLL_RECORDS` defaults to 200. Every
+`KAFKA_MAX_POLL_RECORDS` defaults to 1000. Every
 `KAFKA_METRICS_INTERVAL_SECONDS` (default 30), `course_stream_metrics` logs report
 records processed per second, total lag, and maximum single-partition lag. Batch
 logs include inserted/duplicate counts, validation outcomes, and processing time.
+
+Existing VM `.env` values override this default. Set
+`KAFKA_MAX_POLL_RECORDS=1000` there, then apply it from the deployment directory:
+
+```bash
+docker compose -p the-neural-network up -d --no-deps course-stream
+docker compose -p the-neural-network exec -T course-stream printenv KAFKA_MAX_POLL_RECORDS
+```
+
+Compare ten-minute intervals before and after the change: backlog reduction,
+throughput, rejected records, and recommendation latency (under 600 ms). Polls
+contain up to 1000 records; smaller batches are normal. Larger batches may add
+database contention; if performance worsens, set the value back to 200 and repeat
+the command above. Keep the Kafka group unchanged to resume its saved offsets.
+This setting does not change the course movie API's 200-ID bulk-request limit.
 
 Alvajoy's Flask application factory and route split are retained. The request path
 does not reload the movie catalog or transform every movie on each cold request.
