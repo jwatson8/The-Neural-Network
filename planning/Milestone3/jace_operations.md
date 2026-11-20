@@ -75,10 +75,10 @@ Implementation: [training provenance](../../src/model_updates/provenance.py),
 
 The [scheduled workflow](../../.github/workflows/daily-model.yml) checks hourly.
 `deployment/scheduled_update.py` stores the previous attempt in
-`state/scheduled-update.json` and permits the next run after 36 hours (configurable
-36–48). GitHub delays can make the actual interval longer. The old independent
+`state/scheduled-update.json` and permits the next run after 24 hours (configurable
+24–48). GitHub delays can make the actual interval longer. The old independent
 02:00 trainer is disabled to avoid duplicate schedules. Repository variables are
-`AUTOMATIC_MODEL_PROMOTION_ENABLED=true`, `MODEL_UPDATE_INTERVAL_HOURS=36`, and
+`AUTOMATIC_MODEL_PROMOTION_ENABLED=true`, `MODEL_UPDATE_INTERVAL_HOURS=24`, and
 optional `MODEL_UPDATE_START_AT` as a timezone-aware ISO timestamp. A failed run
 is recorded and requires investigation; it is not counted as an update.
 
