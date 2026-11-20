@@ -1,4 +1,4 @@
-name: Scheduled model updates (36 hours)
+name: Scheduled model updates (24 hours)
 on:
   schedule:
     # Check hourly; persisted state enforces the actual elapsed-hour interval.
@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: Evaluate and promote using the deployed code on the VM
         env:
-          MODEL_UPDATE_INTERVAL_HOURS: ${{ vars.MODEL_UPDATE_INTERVAL_HOURS || '36' }}
+          MODEL_UPDATE_INTERVAL_HOURS: ${{ vars.MODEL_UPDATE_INTERVAL_HOURS || '24' }}
           MODEL_UPDATE_START_AT: ${{ vars.MODEL_UPDATE_START_AT }}
         # No PR checkout or secrets needed: this runner is already on the VM.
         # No environment approval gate: the repository variable is the one-time opt-in.

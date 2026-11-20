@@ -1,4 +1,4 @@
-"""Hourly trigger, persisted 36-hour cadence; uses the trusted deployed checkout."""
+"""Hourly trigger, persisted 24-hour cadence; uses the trusted deployed checkout."""
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -15,8 +15,8 @@ def parse_time(value):
 
 
 def due(now, state, start_at, hours):
-    if not 36 <= hours <= 48:
-        raise ValueError('MODEL_UPDATE_INTERVAL_HOURS must be between 36 and 48')
+    if not 24 <= hours <= 48:
+        raise ValueError('MODEL_UPDATE_INTERVAL_HOURS must be between 24 and 48')
     earliest = parse_time(start_at) if start_at else now
     if state:
         earliest = max(earliest, parse_time(state['started_at']) + timedelta(hours=hours))
@@ -33,7 +33,7 @@ def main():
         state_path = state_dir / 'scheduled-update.json'
         state = json.loads(state_path.read_text()) if state_path.exists() else None
         now = datetime.now(timezone.utc)
-        hours = int(os.getenv('MODEL_UPDATE_INTERVAL_HOURS', '36'))
+        hours = int(os.getenv('MODEL_UPDATE_INTERVAL_HOURS', '24'))
         if not due(now, state, os.getenv('MODEL_UPDATE_START_AT', ''), hours):
             print(json.dumps({'status': 'not_due', 'last_attempt': state}))
             return
