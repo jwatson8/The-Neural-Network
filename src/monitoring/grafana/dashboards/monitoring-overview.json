@@ -8,9 +8,10 @@
   "panels": [
     {
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Five-minute and rolling 24-hour known licensing cost. The rolling value alerts above the provisional $125,000 budget.",
       "fieldConfig": {
-        "defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "unit": "short"},
-        "overrides": []
+        "defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "unit": "currencyUSD"},
+        "overrides": [{"matcher": {"id": "byName", "options": "Rolling 24-hour license cost"}, "properties": [{"id": "custom.thresholdsStyle", "value": {"mode": "line"}}, {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 125000}]}}]}]
       },
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
       "id": 1,
@@ -83,9 +84,9 @@
     },
     {
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
-      "description": "Positive-rating fraction for each model route/version active at the selected range end. A missing rating is not counted as a negative result.",
+      "description": "Positive-rating fraction for each model route/version active at the selected range end. Routes with at least 100 attributed ratings alert below 60%.",
       "fieldConfig": {
-        "defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "max": 1, "min": 0, "unit": "percentunit"},
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"thresholdsStyle": {"mode": "line"}}, "mappings": [], "max": 1, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 0.6}]}, "unit": "percentunit"},
         "overrides": []
       },
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
@@ -176,8 +177,9 @@
     },
     {
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Monitoring worker exceptions grouped into five-minute buckets. Any recorded failure triggers an alert.",
       "fieldConfig": {
-        "defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "min": 0, "unit": "short"},
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"thresholdsStyle": {"mode": "line"}}, "mappings": [], "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "unit": "short"},
         "overrides": []
       },
       "gridPos": {"h": 7, "w": 16, "x": 8, "y": 24},

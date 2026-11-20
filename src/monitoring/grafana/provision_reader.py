@@ -96,6 +96,7 @@ def provision_reader(password: str) -> None:
 
 def main() -> None:
     _required_secret("GRAFANA_ADMIN_PASSWORD")
+    _required_secret("GRAFANA_DISCORD_WEBHOOK_URL")
     provision_reader(_required_secret("GRAFANA_DB_PASSWORD"))
 
 

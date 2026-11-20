@@ -7,7 +7,7 @@
   "panels": [
     {
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
-      "description": "One bar means the monitoring worker successfully persisted a batch during that five-minute interval. A missing bar means no successful persisted run was observed.",
+      "description": "One bar means the monitoring worker successfully persisted a batch during that five-minute interval. A missing bar means no successful persisted run was observed; freshness above 10 minutes for 5 additional minutes triggers an alert.",
       "fieldConfig": {
         "defaults": {
           "color": {"fixedColor": "green", "mode": "fixed"},

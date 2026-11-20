@@ -7,7 +7,7 @@
   "panels": [
     {
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
-      "description": "Successful recommendation requests per completed five-minute bucket. Zero is distinct from a missing bucket.",
+      "description": "Successful recommendation requests per completed five-minute bucket. Three consecutive zero buckets trigger a traffic-stopped alert; missing monitoring data is handled separately.",
       "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "min": 0, "unit": "short"}, "overrides": []},
       "gridPos": {"h": 9, "w": 24, "x": 0, "y": 0},
       "id": 1,
@@ -43,8 +43,8 @@
     },
     {
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
-      "description": "Null for completed buckets with no successful requests.",
-      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "max": 1, "min": 0, "unit": "percentunit"}, "overrides": []},
+      "description": "Null for completed buckets with no successful requests. An alert fires when an eligible bucket remains above 5% for 10 minutes.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"thresholdsStyle": {"mode": "line"}}, "max": 1, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.05}]}, "unit": "percentunit"}, "overrides": []},
       "gridPos": {"h": 9, "w": 12, "x": 12, "y": 9},
       "id": 3,
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},

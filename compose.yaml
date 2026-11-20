@@ -96,6 +96,7 @@ services:
       <<: *database-connection
       GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
       GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-}
+      GRAFANA_DISCORD_WEBHOOK_URL: ${GRAFANA_DISCORD_WEBHOOK_URL:-}
     depends_on:
       database-init: {condition: service_completed_successfully}
 
@@ -113,6 +114,7 @@ services:
       GF_INSTALL_PLUGINS: yesoreyeram-infinity-datasource 3.8.0
       GRAFANA_DB_NAME: ${POSTGRES_DB:-recommender}
       GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-}
+      GRAFANA_DISCORD_WEBHOOK_URL: ${GRAFANA_DISCORD_WEBHOOK_URL:-}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./src/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro

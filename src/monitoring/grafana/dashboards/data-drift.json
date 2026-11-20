@@ -7,7 +7,7 @@
   "panels": [
     {
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
-      "description": "Total variation distance between the prior-hour baseline and recent hour. Scores at or above 0.20 indicate drift under the worker configuration.",
+      "description": "Total variation distance between the prior-hour baseline and recent hour. A non-null score at or above 0.20 for 10 minutes triggers an alert.",
       "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"thresholdsStyle": {"mode": "line"}}, "max": 1, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.2}]}, "unit": "percentunit"}, "overrides": []},
       "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
       "id": 1,
