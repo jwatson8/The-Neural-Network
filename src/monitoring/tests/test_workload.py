@@ -7,8 +7,10 @@ from unittest.mock import patch
 
 from src.monitoring import workload
 from src.monitoring.schemas import (
+    DriftSummary,
     LicensingSummary,
     LLMSummary,
+    LatencySummary,
     MonitoringConfig,
     QualitySummary,
 )
@@ -36,6 +38,8 @@ class MonitoringWorkloadTests(unittest.TestCase):
             positive_rating_count=1,
             accuracy=0.5,
         )
+        self.latency = LatencySummary()
+        self.drift = DriftSummary()
 
     def _summaries(self, value):
         return lambda windows, _config: {window.start: value for window in windows}
@@ -57,6 +61,14 @@ class MonitoringWorkloadTests(unittest.TestCase):
             "calculate_live_model_accuracy_buckets",
             side_effect=self._summaries(self.quality),
         ), patch.object(
+            workload,
+            "calculate_request_latency_buckets",
+            side_effect=self._summaries(self.latency),
+        ), patch.object(
+            workload,
+            "calculate_data_drift_buckets",
+            side_effect=self._summaries(self.drift),
+        ), patch.object(
             workload.monitoring_runs, "upsert_many", return_value=saved
         ) as upsert:
             returned = workload.run_monitoring_workload(self.config)
@@ -67,6 +79,7 @@ class MonitoringWorkloadTests(unittest.TestCase):
         self.assertEqual(results[0].window.start, datetime(2026, 1, 1, 1, tzinfo=UTC))
         self.assertEqual(results[-1].window.end, datetime(2026, 1, 1, 2, tzinfo=UTC))
         self.assertTrue(all(result.generated_at == self.now for result in results))
+        self.assertTrue(all(result.drift == self.drift for result in results))
 
     def test_existing_history_still_reconciles_only_the_latest_hour(self):
         config = MonitoringConfig(backfill_hours=2)
@@ -91,6 +104,35 @@ class MonitoringWorkloadTests(unittest.TestCase):
             side_effect=RuntimeError("database unavailable"),
         ), patch.object(workload.monitoring_runs, "upsert_many") as upsert:
             with self.assertRaisesRegex(RuntimeError, "database unavailable"):
+                workload.run_monitoring_workload(self.config)
+
+        upsert.assert_not_called()
+
+    def test_drift_failure_does_not_persist_other_calculations(self):
+        with patch.object(workload, "_utc_now", return_value=self.now), patch.object(
+            workload.monitoring_runs, "list_windows", return_value=set()
+        ), patch.object(
+            workload,
+            "calculate_license_fee_buckets",
+            side_effect=self._summaries(self.licensing),
+        ), patch.object(
+            workload,
+            "calculate_llm_buckets",
+            side_effect=self._summaries(self.llm),
+        ), patch.object(
+            workload,
+            "calculate_live_model_accuracy_buckets",
+            side_effect=self._summaries(self.quality),
+        ), patch.object(
+            workload,
+            "calculate_request_latency_buckets",
+            side_effect=self._summaries(self.latency),
+        ), patch.object(
+            workload,
+            "calculate_data_drift_buckets",
+            side_effect=RuntimeError("event read failed"),
+        ), patch.object(workload.monitoring_runs, "upsert_many") as upsert:
+            with self.assertRaisesRegex(RuntimeError, "event read failed"):
                 workload.run_monitoring_workload(self.config)
 
         upsert.assert_not_called()

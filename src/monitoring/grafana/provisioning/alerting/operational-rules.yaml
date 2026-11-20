@@ -1,0 +1,182 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: monitoring-operations
+    folder: Monitoring
+    interval: 1m
+    rules:
+      - uid: monitoring-worker-stale
+        title: Monitoring worker is stale
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: monitoring-postgres
+            model:
+              datasource: {type: grafana-postgresql-datasource, uid: monitoring-postgres}
+              editorMode: code
+              format: table
+              intervalMs: 1000
+              maxDataPoints: 43200
+              rawQuery: true
+              rawSql: >-
+                SELECT EXTRACT(EPOCH FROM (NOW() - MAX(generated_at)))::double precision AS value
+                FROM monitoring_runs
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [600], type: gt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: monitoring-worker
+        panelId: 1
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: Monitoring worker has not persisted a run for over 10 minutes
+          description: The monitoring worker is stale or no successful run exists.
+          __dashboardUid__: monitoring-worker
+          __panelId__: "1"
+        labels: {service: monitoring, severity: critical}
+        isPaused: false
+
+      - uid: monitoring-workload-failure
+        title: Monitoring workload failure recorded
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: monitoring-postgres
+            model:
+              datasource: {type: grafana-postgresql-datasource, uid: monitoring-postgres}
+              editorMode: code
+              format: table
+              intervalMs: 1000
+              maxDataPoints: 43200
+              rawQuery: true
+              rawSql: >-
+                SELECT COUNT(*)::double precision AS value FROM data_quality_logs
+                WHERE occurred_at >= NOW() - INTERVAL '10 minutes'
+                AND source = 'monitoring' AND issue_type = 'monitoring_run_failure'
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [1], type: gt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: monitoring-overview
+        panelId: 7
+        noDataState: OK
+        execErrState: Alerting
+        for: 0s
+        annotations:
+          summary: Multiple monitoring workload failures were recorded
+          description: At least two monitoring worker exceptions occurred in the last 10 minutes.
+          __dashboardUid__: monitoring-overview
+          __panelId__: "7"
+        labels: {service: monitoring, severity: warning}
+        isPaused: false
+
+      - uid: recommendation-traffic-stopped
+        title: Recommendation traffic stopped
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 1200, to: 0}
+            datasourceUid: monitoring-postgres
+            model:
+              datasource: {type: grafana-postgresql-datasource, uid: monitoring-postgres}
+              editorMode: code
+              format: table
+              intervalMs: 1000
+              maxDataPoints: 43200
+              rawQuery: true
+              rawSql: >-
+                WITH boundary AS (
+                  SELECT date_bin('5 minutes', NOW(), TIMESTAMPTZ '1970-01-01') AS bucket_end
+                )
+                SELECT CASE WHEN COUNT(*) = 3 THEN SUM(request_count)::double precision ELSE NULL END AS value
+                FROM monitoring_runs CROSS JOIN boundary
+                WHERE window_end > boundary.bucket_end - INTERVAL '15 minutes'
+                AND window_end <= boundary.bucket_end
+                AND window_end = window_start + INTERVAL '5 minutes'
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [1], type: lt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: request-traffic
+        panelId: 1
+        noDataState: OK
+        execErrState: Alerting
+        for: 0s
+        annotations:
+          summary: No successful recommendation requests for 15 minutes
+          description: Three complete monitoring buckets reported zero successful requests.
+          __dashboardUid__: request-traffic
+          __panelId__: "1"
+        labels: {service: recommendation-api, severity: critical}
+        isPaused: false

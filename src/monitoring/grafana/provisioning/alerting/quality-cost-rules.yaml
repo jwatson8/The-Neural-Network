@@ -1,0 +1,202 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: monitoring-quality-and-cost
+    folder: Monitoring
+    interval: 1m
+    rules:
+      - uid: data-distribution-drift
+        title: Data distribution drift detected
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: monitoring-postgres
+            model:
+              datasource: {type: grafana-postgresql-datasource, uid: monitoring-postgres}
+              editorMode: code
+              format: table
+              intervalMs: 1000
+              maxDataPoints: 43200
+              rawQuery: true
+              rawSql: >-
+                WITH latest AS (
+                  SELECT rating_drift_tvd, event_type_drift_tvd FROM monitoring_runs
+                  WHERE window_end <= date_bin('5 minutes', NOW(), TIMESTAMPTZ '1970-01-01')
+                  AND window_end = window_start + INTERVAL '5 minutes'
+                  ORDER BY window_end DESC LIMIT 1
+                ), scores AS (
+                  SELECT 'rating'::text AS metric, rating_drift_tvd::double precision AS value FROM latest
+                  UNION ALL
+                  SELECT 'event_type'::text AS metric, event_type_drift_tvd::double precision AS value FROM latest
+                )
+                SELECT metric, value FROM scores WHERE value >= 0.20
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [0], type: gt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: data-drift
+        panelId: 1
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "{{ $labels.metric }} distribution TVD is at least 0.20"
+          description: A sufficiently sampled rolling drift score has remained over its configured threshold.
+          __dashboardUid__: data-drift
+          __panelId__: "1"
+        labels: {service: data-quality, severity: warning}
+        isPaused: false
+
+      - uid: model-accuracy-low
+        title: Model accuracy is low
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 86400, to: 0}
+            datasourceUid: monitoring-postgres
+            model:
+              datasource: {type: grafana-postgresql-datasource, uid: monitoring-postgres}
+              editorMode: code
+              format: table
+              intervalMs: 1000
+              maxDataPoints: 43200
+              rawQuery: true
+              rawSql: >-
+                WITH boundary AS (
+                  SELECT date_bin('5 minutes', NOW(), TIMESTAMPTZ '1970-01-01') AS bucket_end
+                )
+                SELECT accuracy.model_route, accuracy.model_version,
+                  SUM(accuracy.positive_rating_count)::double precision /
+                    NULLIF(SUM(accuracy.attributed_rating_count), 0) AS value
+                FROM monitoring_model_accuracy AS accuracy
+                JOIN monitoring_runs AS run ON run.run_id = accuracy.run_id
+                CROSS JOIN boundary
+                WHERE run.window_end > boundary.bucket_end - INTERVAL '24 hours'
+                AND run.window_end <= boundary.bucket_end
+                AND run.window_end = run.window_start + INTERVAL '5 minutes'
+                GROUP BY accuracy.model_route, accuracy.model_version
+                HAVING SUM(accuracy.attributed_rating_count) >= 100
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [0.6], type: lt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: monitoring-overview
+        panelId: 4
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "{{ $labels.model_route }} / {{ $labels.model_version }} accuracy is below 60%"
+          description: Rolling 24-hour positive-rating fraction is below 60% with at least 100 attributed ratings.
+          __dashboardUid__: monitoring-overview
+          __panelId__: "4"
+        labels: {service: recommendation-model, severity: warning}
+        isPaused: false
+
+      - uid: licensing-cost-budget-high
+        title: Licensing cost exceeds budget
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 86400, to: 0}
+            datasourceUid: monitoring-postgres
+            model:
+              datasource: {type: grafana-postgresql-datasource, uid: monitoring-postgres}
+              editorMode: code
+              format: table
+              intervalMs: 1000
+              maxDataPoints: 43200
+              rawQuery: true
+              rawSql: >-
+                WITH boundary AS (
+                  SELECT date_bin('5 minutes', NOW(), TIMESTAMPTZ '1970-01-01') AS bucket_end
+                )
+                SELECT SUM(total_license_cost)::double precision AS value
+                FROM monitoring_runs CROSS JOIN boundary
+                WHERE window_end > boundary.bucket_end - INTERVAL '24 hours'
+                AND window_end <= boundary.bucket_end
+                AND window_end = window_start + INTERVAL '5 minutes'
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [125000], type: gt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: monitoring-overview
+        panelId: 1
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: Rolling 24-hour licensing cost exceeds $125,000
+          description: Known licensing charges have remained above the provisional operating budget.
+          __dashboardUid__: monitoring-overview
+          __panelId__: "1"
+        labels: {service: licensing, severity: warning}
+        isPaused: false

@@ -2,7 +2,9 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from math import isclose
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
+
+from src.data_quality.drift import EVENT_TYPES
 
 
 def _normalize_utc(value: datetime, field_name: str) -> datetime:
@@ -20,6 +22,9 @@ class MonitoringConfig(BaseModel):
     attribution_hours: int = Field(default=24, gt=0)
     positive_rating_threshold: int = Field(default=6, ge=1, le=10)
     page_size: int = Field(default=1000, ge=1, le=1000)
+    drift_window_hours: int = Field(default=1, gt=0)
+    drift_threshold: float = Field(default=0.20, ge=0, le=1)
+    drift_min_samples: int = Field(default=100, gt=0)
 
     @model_validator(mode="after")
     def check_bucket_coverage(self):
@@ -75,6 +80,67 @@ class LLMSummary(BaseModel):
     def check_priced_request_count(self):
         if self.priced_request_count > self.request_count:
             raise ValueError("priced_request_count cannot exceed request_count")
+        return self
+
+
+class RouteLatencySummary(BaseModel):
+    """Five-minute successful-request latency for one serving route."""
+
+    model_route: str = Field(min_length=1, max_length=100)
+    request_count: int = Field(default=0, ge=0)
+    request_count_over_600ms: int = Field(default=0, ge=0)
+    average_ms: float | None = Field(default=None, ge=0)
+    p50_ms: float | None = Field(default=None, ge=0)
+    p95_ms: float | None = Field(default=None, ge=0)
+    p99_ms: float | None = Field(default=None, ge=0)
+    maximum_ms: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def check_distribution(self):
+        if self.request_count_over_600ms > self.request_count:
+            raise ValueError("request_count_over_600ms cannot exceed request_count")
+        statistics = (
+            self.average_ms,
+            self.p50_ms,
+            self.p95_ms,
+            self.p99_ms,
+            self.maximum_ms,
+        )
+        if self.request_count == 0:
+            if self.request_count_over_600ms or any(
+                value is not None for value in statistics
+            ):
+                raise ValueError("empty latency summaries cannot contain statistics")
+            return self
+        if any(value is None for value in statistics):
+            raise ValueError("latency statistics are required when requests exist")
+        if not self.p50_ms <= self.p95_ms <= self.p99_ms <= self.maximum_ms:
+            raise ValueError("latency percentiles must be ordered through maximum_ms")
+        if self.average_ms > self.maximum_ms:
+            raise ValueError("average_ms cannot exceed maximum_ms")
+        return self
+
+
+class LatencySummary(RouteLatencySummary):
+    """Overall latency plus route-level summaries for one monitoring bucket."""
+
+    model_route: str = Field(default="all", exclude=True)
+    routes: list[RouteLatencySummary] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def check_routes(self):
+        identities = [summary.model_route for summary in self.routes]
+        if len(identities) != len(set(identities)):
+            raise ValueError("routes must contain unique model_route values")
+        if any(summary.request_count == 0 for summary in self.routes):
+            raise ValueError("empty route latency summaries must be omitted")
+        if sum(summary.request_count for summary in self.routes) != self.request_count:
+            raise ValueError("route request counts must equal the overall request count")
+        if (
+            sum(summary.request_count_over_600ms for summary in self.routes)
+            != self.request_count_over_600ms
+        ):
+            raise ValueError("route slow-request counts must equal the overall count")
         return self
 
 
@@ -145,6 +211,33 @@ class QualitySummary(BaseModel):
         return self
 
 
+def _empty_event_type_counts() -> dict[str, int]:
+    return {event_type: 0 for event_type in EVENT_TYPES}
+
+
+class DriftSummary(BaseModel):
+    """Rating and event-type drift for adjacent rolling windows."""
+
+    rating_drift_tvd: float | None = Field(default=None, ge=0, le=1)
+    event_type_drift_tvd: float | None = Field(default=None, ge=0, le=1)
+    rating_drift_sample_count: int = Field(default=0, ge=0)
+    event_type_baseline_counts: dict[str, StrictInt] = Field(
+        default_factory=_empty_event_type_counts
+    )
+    event_type_recent_counts: dict[str, StrictInt] = Field(
+        default_factory=_empty_event_type_counts
+    )
+
+    @field_validator("event_type_baseline_counts", "event_type_recent_counts")
+    @classmethod
+    def check_event_type_counts(cls, counts: dict[str, int]):
+        if set(counts) != set(EVENT_TYPES):
+            raise ValueError("event type counts must contain every supported event type")
+        if any(isinstance(count, bool) or count < 0 for count in counts.values()):
+            raise ValueError("event type counts must be nonnegative integers")
+        return {event_type: counts[event_type] for event_type in EVENT_TYPES}
+
+
 class MonitorResult(BaseModel):
     """Complete monitoring payload for one evaluation window."""
 
@@ -153,6 +246,8 @@ class MonitorResult(BaseModel):
     licensing: LicensingSummary
     llm: LLMSummary
     quality: QualitySummary
+    latency: LatencySummary = Field(default_factory=LatencySummary)
+    drift: DriftSummary = Field(default_factory=DriftSummary)
 
     @field_validator("generated_at")
     @classmethod

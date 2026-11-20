@@ -31,7 +31,7 @@ class DatabaseComposeTests(unittest.TestCase):
         migration = self.services["database-migrate"]
         self.assertEqual(migration["restart"], "no")
         self.assertEqual(migration["command"], ["python", "-m",
-            "src.database.migrations.add_experimentation_schema", "--apply", "--bootstrap-if-empty"])
+            "src.database.migrations.apply_all", "--apply", "--bootstrap-if-empty"])
         self.assertEqual(migration["depends_on"]["database"]["condition"], "service_healthy")
         self.assertEqual(self.services["database-init"]["depends_on"]["database-migrate"]["condition"],
                          "service_completed_successfully")

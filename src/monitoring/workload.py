@@ -5,9 +5,11 @@ from datetime import UTC, datetime, timedelta
 from src.database.interactions import monitoring_runs
 from src.monitoring.buckets import floor_to_bucket, utc_datetime, windows_between
 from src.monitoring.calculations import (
+    calculate_data_drift_buckets,
     calculate_license_fee_buckets,
     calculate_live_model_accuracy_buckets,
     calculate_llm_buckets,
+    calculate_request_latency_buckets,
 )
 from src.monitoring.schemas import MonitoringConfig, MonitorResult
 
@@ -52,6 +54,8 @@ def run_monitoring_workload(config: MonitoringConfig):
     licensing = calculate_license_fee_buckets(windows, config)
     llm = calculate_llm_buckets(windows, config)
     quality = calculate_live_model_accuracy_buckets(windows, config)
+    latency = calculate_request_latency_buckets(windows, config)
+    drift = calculate_data_drift_buckets(windows, config)
     results = [
         MonitorResult(
             generated_at=generated_at,
@@ -59,6 +63,8 @@ def run_monitoring_workload(config: MonitoringConfig):
             licensing=licensing[window.start],
             llm=llm[window.start],
             quality=quality[window.start],
+            latency=latency[window.start],
+            drift=drift[window.start],
         )
         for window in windows
     ]

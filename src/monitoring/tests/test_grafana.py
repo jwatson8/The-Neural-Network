@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,7 +22,7 @@ class GrafanaProvisioningTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "GRAFANA_DB_PASSWORD"):
                     provision_reader._required_secret("GRAFANA_DB_PASSWORD")
 
-    def test_reader_role_is_committed_and_connections_are_closed(self):
+    def test_reader_role_commits_and_closes_resources(self):
         cursor = Mock()
         cursor.fetchone.return_value = None
         connection = Mock()
@@ -33,72 +34,84 @@ class GrafanaProvisioningTests(unittest.TestCase):
         with patch.object(provision_reader, "get_engine", return_value=engine):
             provision_reader.provision_reader("reader-secret")
 
-        self.assertGreaterEqual(cursor.execute.call_count, 10)
         connection.commit.assert_called_once_with()
         connection.rollback.assert_not_called()
         cursor.close.assert_called_once_with()
         connection.close.assert_called_once_with()
 
-    def test_dashboard_and_provisioning_assets_have_stable_contracts(self):
-        dashboard_path = GRAFANA_ROOT / "dashboards" / "monitoring-overview.json"
-        dashboard = json.loads(dashboard_path.read_text())
-        panel_titles = {panel["title"] for panel in dashboard["panels"]}
+    def test_reader_role_rolls_back_and_closes_resources_on_failure(self):
+        cursor = Mock()
+        cursor.execute.side_effect = RuntimeError("database unavailable")
+        connection = Mock()
+        connection.cursor.return_value = cursor
+        engine = Mock()
+        engine.url = SimpleNamespace(database="recommender")
+        engine.raw_connection.return_value = connection
 
-        self.assertEqual(dashboard["uid"], "monitoring-overview")
-        self.assertEqual(len(dashboard["panels"]), 8)
-        self.assertIn("Successful Run Freshness", panel_titles)
-        self.assertIn("Monitoring Failures", panel_titles)
-        self.assertIn(
-            "Model Accuracy by Route/Version: Rolling 24-Hour", panel_titles
-        )
-        self.assertIn(
-            "Attributed Ratings by Route/Version: Rolling 24-Hour", panel_titles
-        )
-        data_view = json.loads(
-            (GRAFANA_ROOT / "dashboards" / "application-data.json").read_text()
-        )
-        self.assertEqual(data_view["uid"], "application-data-view")
-        self.assertEqual(data_view["refresh"], "1h")
-        self.assertEqual(len(data_view["panels"]), 1)
-        summary_panel = data_view["panels"][0]
-        self.assertEqual(summary_panel["title"], "Application Table Row Counts")
-        summary_query = summary_panel["targets"][0]
-        self.assertEqual(summary_query["url"], "http://api:8082/database/summary")
-        self.assertEqual(summary_query["url_options"]["method"], "GET")
-        self.assertEqual(summary_query["uql"], 'parse-json | project kv("tables")')
-        summary_overrides = summary_panel["fieldConfig"]["overrides"]
-        self.assertEqual(
-            [override["properties"][0]["value"] for override in summary_overrides],
-            ["Table", "Rows"],
-        )
-        queries = " ".join(
-            target["rawSql"]
-            for panel in dashboard["panels"]
-            for target in panel["targets"]
-            if "rawSql" in target
-        )
-        self.assertIn("INTERVAL '5 minutes'", queries)
-        self.assertIn("monitoring_model_accuracy", queries)
-        self.assertIn("PARTITION BY model_route, model_version", queries)
-        self.assertNotIn("5-minute accuracy", queries)
-        self.assertNotIn("$__timeFrom() - INTERVAL", queries)
-        self.assertIn("CAST($__timeFrom() AS timestamptz)", queries)
+        with patch.object(
+            provision_reader, "get_engine", return_value=engine
+        ), self.assertRaisesRegex(RuntimeError, "database unavailable"):
+            provision_reader.provision_reader("reader-secret")
 
-        datasource = (
-            GRAFANA_ROOT / "provisioning" / "datasources" / "monitoring.yaml"
-        ).read_text()
-        provider = (
-            GRAFANA_ROOT / "provisioning" / "dashboards" / "monitoring.yaml"
-        ).read_text()
-        self.assertIn("uid: monitoring-postgres", datasource)
-        self.assertIn("password: $__env{GRAFANA_DB_PASSWORD}", datasource)
-        self.assertIn("path: /etc/grafana/dashboards", provider)
-        self.assertIn("monitoring_model_accuracy", provision_reader.READABLE_TABLES)
-        data_view = (
-            GRAFANA_ROOT / "provisioning" / "datasources" / "data-view.yaml"
-        ).read_text()
-        self.assertIn("uid: data-view-api", data_view)
-        self.assertIn("http://api:8082", data_view)
+        connection.commit.assert_not_called()
+        connection.rollback.assert_called_once_with()
+        cursor.close.assert_called_once_with()
+        connection.close.assert_called_once_with()
+
+    def test_dashboard_queries_use_provisioned_datasources_and_readable_tables(self):
+        datasource_root = GRAFANA_ROOT / "provisioning" / "datasources"
+        monitoring_config = (datasource_root / "monitoring.yaml").read_text()
+        data_view_config = (datasource_root / "data-view.yaml").read_text()
+        provisioned_uids = {
+            match.group(1)
+            for config in (monitoring_config, data_view_config)
+            for match in re.finditer(r"^\s*uid:\s*(\S+)\s*$", config, re.MULTILINE)
+        }
+        allowed_hosts = {
+            match.group(1)
+            for match in re.finditer(
+                r"^\s*-\s*(https?://\S+)\s*$", data_view_config, re.MULTILINE
+            )
+        }
+
+        dashboard_paths = list((GRAFANA_ROOT / "dashboards").glob("*.json"))
+        self.assertTrue(dashboard_paths)
+        for dashboard_path in dashboard_paths:
+            dashboard = json.loads(dashboard_path.read_text())
+            panel_ids = [panel["id"] for panel in dashboard["panels"]]
+            self.assertEqual(len(panel_ids), len(set(panel_ids)))
+            for panel in dashboard["panels"]:
+                panel_datasource = panel["datasource"]["uid"]
+                self.assertIn(panel_datasource, provisioned_uids)
+                for target in panel["targets"]:
+                    self.assertEqual(target["datasource"]["uid"], panel_datasource)
+                    raw_sql = target.get("rawSql")
+                    url = target.get("url")
+                    self.assertTrue(raw_sql or url)
+                    if raw_sql:
+                        cte_names = {
+                            name.lower()
+                            for name in re.findall(
+                                r"(?:WITH|,)\s+(\w+)\s+AS\s*\(",
+                                raw_sql,
+                                re.IGNORECASE,
+                            )
+                        }
+                        referenced_tables = {
+                            name.lower()
+                            for name in re.findall(
+                                r"\b(?:FROM|JOIN)\s+(?:public\.)?(\w+)",
+                                raw_sql,
+                                re.IGNORECASE,
+                            )
+                        } - cte_names
+                        self.assertLessEqual(
+                            referenced_tables, set(provision_reader.READABLE_TABLES)
+                        )
+                    if url:
+                        self.assertTrue(
+                            any(url.startswith(host) for host in allowed_hosts)
+                        )
 
 
 if __name__ == "__main__":

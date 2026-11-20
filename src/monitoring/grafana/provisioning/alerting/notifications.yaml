@@ -1,0 +1,22 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: Monitoring Discord
+    receivers:
+      - uid: monitoring-discord
+        type: discord
+        disableResolveMessage: false
+        settings:
+          url: $GRAFANA_DISCORD_WEBHOOK_URL
+          use_discord_username: false
+
+policies:
+  - orgId: 1
+    receiver: Monitoring Discord
+    group_by:
+      - service
+      - severity
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h

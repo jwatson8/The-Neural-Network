@@ -8,7 +8,7 @@ from sqlmodel import SQLModel
 from src.database import models  # noqa: F401 - registers table metadata
 from src.database.database import get_engine
 
-MIGRATION_COMMAND = "python -m src.database.migrations.add_experimentation_schema --apply"
+MIGRATION_COMMAND = "python -m src.database.migrations.apply_all --apply"
 
 
 def verify_schema(bind: Engine | Connection) -> None:

@@ -1,12 +1,15 @@
 """Schedule complete monitoring workloads in a single worker process."""
 
 import logging
+import os
 import signal
 import time
 from datetime import UTC, datetime
 from threading import Event
+from uuid import uuid4
 
 from src.database.interactions import data_quality_logs
+from src.monitoring.healthchecks import HealthchecksClient
 from src.monitoring.schemas import MonitoringConfig
 from src.monitoring.workload import run_monitoring_workload
 
@@ -29,16 +32,25 @@ def _persist_monitoring_failure(error: Exception, duration: float) -> None:
         LOGGER.error("monitoring_failure_persistence_failed")
 
 
-def run_monitoring_worker(config: MonitoringConfig, stop_event: Event) -> None:
+def run_monitoring_worker(
+    config: MonitoringConfig,
+    stop_event: Event,
+    healthchecks: HealthchecksClient | None = None,
+) -> None:
     """Run immediately, then reconcile on UTC bucket boundaries."""
     LOGGER.info(
         "monitoring_worker_started bucket_minutes=%d", config.bucket_minutes
     )
     while not stop_event.is_set():
+        run_id = uuid4()
+        if healthchecks is not None:
+            healthchecks.ping(run_id, "start")
         started_at = time.monotonic()
         try:
             saved_runs = run_monitoring_workload(config)
             duration = time.monotonic() - started_at
+            if healthchecks is not None:
+                healthchecks.ping(run_id)
             LOGGER.info(
                 "monitoring_run_completed bucket_count=%d duration_seconds=%.3f",
                 len(saved_runs),
@@ -46,6 +58,8 @@ def run_monitoring_worker(config: MonitoringConfig, stop_event: Event) -> None:
             )
         except Exception as error:
             duration = time.monotonic() - started_at
+            if healthchecks is not None:
+                healthchecks.ping(run_id, "fail")
             LOGGER.exception(
                 "monitoring_run_failed duration_seconds=%.3f",
                 duration,
@@ -70,7 +84,14 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, request_shutdown)
     signal.signal(signal.SIGINT, request_shutdown)
-    run_monitoring_worker(MonitoringConfig(), stop_event)
+    healthchecks_url = os.getenv("HEALTHCHECKS_MONITORING_URL", "").strip()
+    if not healthchecks_url:
+        raise RuntimeError("Set HEALTHCHECKS_MONITORING_URL before enabling monitoring")
+    run_monitoring_worker(
+        MonitoringConfig(),
+        stop_event,
+        HealthchecksClient(healthchecks_url),
+    )
 
 
 if __name__ == "__main__":

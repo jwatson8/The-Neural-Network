@@ -10,6 +10,7 @@ READER_ROLE = "grafana_reader"
 READABLE_TABLES = (
     "monitoring_runs",
     "monitoring_model_accuracy",
+    "monitoring_route_latency",
     "data_quality_logs",
 )
 
@@ -95,6 +96,7 @@ def provision_reader(password: str) -> None:
 
 def main() -> None:
     _required_secret("GRAFANA_ADMIN_PASSWORD")
+    _required_secret("GRAFANA_DISCORD_WEBHOOK_URL")
     provision_reader(_required_secret("GRAFANA_DB_PASSWORD"))
 
 

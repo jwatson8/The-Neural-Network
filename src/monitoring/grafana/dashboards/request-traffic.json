@@ -1,0 +1,90 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Successful recommendation requests per completed five-minute bucket. Three consecutive zero buckets trigger a traffic-stopped alert; missing monitoring data is handled separately.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "min": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code",
+        "format": "time_series",
+        "rawQuery": true,
+        "rawSql": "SELECT window_end AS time, request_count::double precision AS \"Successful requests\" FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes' ORDER BY window_end",
+        "refId": "A"
+      }],
+      "title": "Successful Request Volume",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Successful requests whose turnaround time was strictly greater than 600 ms.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "min": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 9},
+      "id": 2,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code",
+        "format": "time_series",
+        "rawQuery": true,
+        "rawSql": "SELECT window_end AS time, request_count_over_600ms::double precision AS \"Requests over 600 ms\" FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes' ORDER BY window_end",
+        "refId": "A"
+      }],
+      "title": "Slow Request Count",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Null for completed buckets with no successful requests. An alert fires when an eligible bucket remains above 5% for 10 minutes.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"thresholdsStyle": {"mode": "line"}}, "max": 1, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.05}]}, "unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 9},
+      "id": 3,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code",
+        "format": "time_series",
+        "rawQuery": true,
+        "rawSql": "SELECT window_end AS time, CASE WHEN request_count = 0 THEN NULL ELSE request_count_over_600ms::double precision / request_count END AS \"Share over 600 ms\" FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes' ORDER BY window_end",
+        "refId": "A"
+      }],
+      "title": "Slow Request Share",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 420}, {"color": "red", "value": 600}]}, "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 18},
+      "id": 4,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code",
+        "format": "table",
+        "rawQuery": true,
+        "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(generated_at)))::double precision AS \"Seconds since success\" FROM monitoring_runs",
+        "refId": "A"
+      }],
+      "title": "Monitoring Freshness",
+      "type": "stat"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 42,
+  "tags": ["monitoring", "traffic"],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Request Traffic",
+  "uid": "request-traffic",
+  "version": 1
+}

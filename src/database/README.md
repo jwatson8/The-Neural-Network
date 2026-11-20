@@ -7,16 +7,16 @@ and Psycopg.
 
 ## Organization
 
-The database is organized by table and table-specific interactions. There are 17 tables:
+The database is organized by table and table-specific interactions. There are 18 tables:
 
 `stream_events`, `course_requests`, `user_movie_history`, `recommendation_serves`, `users`,
 `llm_usage`, `movies`, `cold_start_jobs`, `cold_start_profiles`,
 `data_quality_logs`, `model_logs`, `licensing_costs`, `monitoring_runs`,
-`monitoring_model_accuracy`, `experiments`, `experiment_assignments`, and
+`monitoring_model_accuracy`, `monitoring_route_latency`, `experiments`, `experiment_assignments`, and
 `experiment_reports`.
 
 Tables have a corresponding module under `src/database/interactions`, except
-`monitoring_model_accuracy`, whose child rows are managed atomically through the
+`monitoring_model_accuracy` and `monitoring_route_latency`, whose child rows are managed atomically through the
 `monitoring_runs` module. Public functions validate inputs through `schemas.py`, own
 their database transaction, and commit on success or roll back on failure.
 
@@ -192,7 +192,8 @@ explicit migration error. `create_all()` is never used to fill gaps in an existi
 schema; previous automatic column type adjustments are also no longer performed.
 
 Compose runs the dedicated `database-migrate` job after PostgreSQL is healthy.
-It applies the experiment migration before `database-init`, roll-up, and the API;
+The `apply_all` runner applies the independently owned experiment migration and
+then the monitoring migration before `database-init`, roll-up, and the API;
 a migration failure blocks those dependent services. The job bootstraps the full
 schema only when empty, under the migration transaction and advisory lock.
 `initialize.py` itself continues to verify existing schemas without migrating.
@@ -200,7 +201,7 @@ schema only when empty, under the migration transaction and advisory lock.
 The migration can also be run separately with database connection settings:
 
 ```sh
-python -m src.database.migrations.add_experimentation_schema --apply
+python -m src.database.migrations.apply_all --apply
 python -m src.database.initialize --check
 ```
 
@@ -208,18 +209,29 @@ The standalone command requires the existing base tables. Compose adds the expli
 `--bootstrap-if-empty` option for first-time setup. Back up first, run the migration,
 verify the schema, and then start updated services.
 
-The migration remains transactional and safe to rerun, with its advisory lock,
-timeouts, and FK validation. Existing recommendation records retain NULL assignment
-references. Table and index changes acquire locks; rehearse on an isolated copy and
-retain the additive schema when rolling back application code. Other schema changes
-require their own explicit migrations.
+Each migration remains transactional and safe to rerun, with its own advisory lock
+and timeouts. `add_experimentation_schema` owns experiment tables and the nullable
+recommendation-serve assignment link. `add_monitoring_schema` owns request-latency
+aggregates, drift placeholders, and `monitoring_route_latency`. Table and index
+changes acquire locks; rehearse on an isolated copy and retain additive schema when
+rolling back application code. Other schema changes require their own explicit
+migrations.
+
+For isolated maintenance, the owned migrations remain directly runnable:
+
+```sh
+python -m src.database.migrations.add_experimentation_schema --apply
+python -m src.database.migrations.add_monitoring_schema --apply
+```
 
 PostgreSQL migration tests create a temporary local cluster. Set the local binary
 directory to run them; otherwise they are skipped:
 
 ```sh
 M3_TEST_POSTGRES_BIN_DIR=/path/to/postgresql/bin \
-  python -m unittest src.database.tests.test_experiment_migration_postgres -v
+  python -m unittest \
+    src.database.tests.test_experiment_migration_postgres \
+    src.database.tests.test_monitoring_migration_postgres -v
 ```
 
 ## Service Integration
