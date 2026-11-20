@@ -10,6 +10,7 @@ READER_ROLE = "grafana_reader"
 READABLE_TABLES = (
     "monitoring_runs",
     "monitoring_model_accuracy",
+    "monitoring_route_latency",
     "data_quality_logs",
 )
 

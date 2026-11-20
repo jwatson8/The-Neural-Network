@@ -11,6 +11,7 @@ from src.monitoring.schemas import (
     LLMSummary,
     MonitoringConfig,
     QualitySummary,
+    LatencySummary,
 )
 
 
@@ -36,6 +37,7 @@ class MonitoringWorkloadTests(unittest.TestCase):
             positive_rating_count=1,
             accuracy=0.5,
         )
+        self.latency = LatencySummary()
 
     def _summaries(self, value):
         return lambda windows, _config: {window.start: value for window in windows}
@@ -56,6 +58,10 @@ class MonitoringWorkloadTests(unittest.TestCase):
             workload,
             "calculate_live_model_accuracy_buckets",
             side_effect=self._summaries(self.quality),
+        ), patch.object(
+            workload,
+            "calculate_request_latency_buckets",
+            side_effect=self._summaries(self.latency),
         ), patch.object(
             workload.monitoring_runs, "upsert_many", return_value=saved
         ) as upsert:

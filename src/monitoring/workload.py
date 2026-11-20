@@ -8,6 +8,7 @@ from src.monitoring.calculations import (
     calculate_license_fee_buckets,
     calculate_live_model_accuracy_buckets,
     calculate_llm_buckets,
+    calculate_request_latency_buckets,
 )
 from src.monitoring.schemas import MonitoringConfig, MonitorResult
 
@@ -52,6 +53,7 @@ def run_monitoring_workload(config: MonitoringConfig):
     licensing = calculate_license_fee_buckets(windows, config)
     llm = calculate_llm_buckets(windows, config)
     quality = calculate_live_model_accuracy_buckets(windows, config)
+    latency = calculate_request_latency_buckets(windows, config)
     results = [
         MonitorResult(
             generated_at=generated_at,
@@ -59,6 +61,7 @@ def run_monitoring_workload(config: MonitoringConfig):
             licensing=licensing[window.start],
             llm=llm[window.start],
             quality=quality[window.start],
+            latency=latency[window.start],
         )
         for window in windows
     ]

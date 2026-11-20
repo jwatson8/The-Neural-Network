@@ -58,7 +58,7 @@ services:
   database-migrate:
     <<: *service
     restart: "no"
-    command: [python, -m, src.database.migrations.add_experimentation_schema, --apply, --bootstrap-if-empty]
+    command: [python, -m, src.database.migrations.apply_all, --apply, --bootstrap-if-empty]
     environment: *database-connection
     depends_on:
       database: {condition: service_healthy}

@@ -9,8 +9,13 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from src.database.interactions import monitoring_runs
-from src.database.models import MonitoringModelAccuracy
-from src.monitoring.schemas import ModelAccuracySummary, MonitorResult
+from src.database.models import MonitoringModelAccuracy, MonitoringRouteLatency
+from src.monitoring.schemas import (
+    LatencySummary,
+    ModelAccuracySummary,
+    MonitorResult,
+    RouteLatencySummary,
+)
 
 
 class MonitoringRunTests(unittest.TestCase):
@@ -137,6 +142,72 @@ class MonitoringRunTests(unittest.TestCase):
         self.assertEqual(rows[0].model_route, "popularity_fallback")
         self.assertEqual(rows[0].model_version, "m2")
         self.assertIsNone(rows[0].recommendation_accuracy)
+
+    def test_bucket_upsert_replaces_route_latency_children(self):
+        result = self.result(generated_at=self.now)
+        result.window.start = self.now - timedelta(minutes=5)
+        result.window.end = self.now
+        route = RouteLatencySummary(
+            model_route="control",
+            request_count=1,
+            average_ms=600,
+            p50_ms=600,
+            p95_ms=600,
+            p99_ms=600,
+            maximum_ms=600,
+        )
+        result.latency = LatencySummary(
+            request_count=1,
+            average_ms=600,
+            p50_ms=600,
+            p95_ms=600,
+            p99_ms=600,
+            maximum_ms=600,
+            routes=[route],
+        )
+        monitoring_runs.upsert_many([result])
+
+        fallback = route.model_copy(
+            update={"model_route": "fallback", "request_count_over_600ms": 1}
+        )
+        result.latency = result.latency.model_copy(update={"routes": [fallback]})
+        monitoring_runs.upsert_many([result])
+
+        with Session(self.engine) as session:
+            rows = session.exec(select(MonitoringRouteLatency)).all()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].model_route, "fallback")
+        self.assertEqual(rows[0].request_count_over_600ms, 1)
+
+    def test_latency_reconciliation_preserves_future_drift_values(self):
+        result = self.result(generated_at=self.now)
+        result.window.start = self.now - timedelta(minutes=5)
+        result.window.end = self.now
+        stored = monitoring_runs.upsert_many([result])[0]
+        with Session(self.engine) as session:
+            record = session.get(type(stored), stored.run_id)
+            record.rating_drift_tvd = 0.2
+            record.event_type_drift_tvd = 0.1
+            record.rating_drift_sample_count = 50
+            record.event_type_baseline_counts = {"watch": 40, "rating": 10}
+            record.event_type_recent_counts = {"watch": 35, "rating": 15}
+            session.add(record)
+            session.commit()
+
+        result.generated_at += timedelta(minutes=5)
+        reconciled = monitoring_runs.upsert_many([result])[0]
+
+        self.assertEqual(reconciled.rating_drift_tvd, 0.2)
+        self.assertEqual(reconciled.event_type_drift_tvd, 0.1)
+        self.assertEqual(reconciled.rating_drift_sample_count, 50)
+        self.assertEqual(
+            reconciled.event_type_baseline_counts,
+            {"watch": 40, "rating": 10},
+        )
+        self.assertEqual(
+            reconciled.event_type_recent_counts,
+            {"watch": 35, "rating": 15},
+        )
 
 
 if __name__ == "__main__":

@@ -20,7 +20,11 @@ from src.database.interactions._shared import (
 from src.database.interactions._shared import (
     list_records as list_model_records,
 )
-from src.database.models import MonitoringModelAccuracy, MonitoringRun
+from src.database.models import (
+    MonitoringModelAccuracy,
+    MonitoringRouteLatency,
+    MonitoringRun,
+)
 from src.monitoring.schemas import MonitorResult
 
 __all__ = [
@@ -51,6 +55,15 @@ def _result_values(result: MonitorResult, run_id: UUID) -> dict[str, Any]:
         "attributed_rating_count": result.quality.attributed_rating_count,
         "positive_rating_count": result.quality.positive_rating_count,
         "recommendation_accuracy": result.quality.accuracy,
+        "request_count": result.latency.request_count,
+        "request_count_over_600ms": result.latency.request_count_over_600ms,
+        "request_latency_average_ms": result.latency.average_ms,
+        "request_latency_p50_ms": result.latency.p50_ms,
+        "request_latency_p95_ms": result.latency.p95_ms,
+        "request_latency_p99_ms": result.latency.p99_ms,
+        "request_latency_maximum_ms": result.latency.maximum_ms,
+        "event_type_baseline_counts": {},
+        "event_type_recent_counts": {},
     }
 
 
@@ -67,6 +80,25 @@ def _model_accuracy_values(
             "recommendation_accuracy": summary.accuracy,
         }
         for summary in result.quality.models
+    ]
+
+
+def _route_latency_values(
+    result: MonitorResult, run_id: UUID
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "run_id": run_id,
+            "model_route": summary.model_route,
+            "request_count": summary.request_count,
+            "request_count_over_600ms": summary.request_count_over_600ms,
+            "request_latency_average_ms": summary.average_ms,
+            "request_latency_p50_ms": summary.p50_ms,
+            "request_latency_p95_ms": summary.p95_ms,
+            "request_latency_p99_ms": summary.p99_ms,
+            "request_latency_maximum_ms": summary.maximum_ms,
+        }
+        for summary in result.latency.routes
     ]
 
 
@@ -92,6 +124,12 @@ def _create(
     if model_values:
         session.execute(
             dialect_insert(session, MonitoringModelAccuracy).values(model_values)
+        )
+        session.flush()
+    route_values = _route_latency_values(result, resolved_run_id)
+    if route_values:
+        session.execute(
+            dialect_insert(session, MonitoringRouteLatency).values(route_values)
         )
         session.flush()
     return record
@@ -120,7 +158,13 @@ def _upsert_many(
         return []
     values = [_result_values(result, _bucket_run_id(result)) for result in results]
     statement = dialect_insert(session, MonitoringRun).values(values)
-    update_fields = tuple(key for key in values[0] if key != "run_id")
+    insert_only_fields = {
+        "event_type_baseline_counts",
+        "event_type_recent_counts",
+    }
+    update_fields = tuple(
+        key for key in values[0] if key != "run_id" and key not in insert_only_fields
+    )
     statement = statement.on_conflict_do_update(
         index_elements=["run_id"],
         set_={field: getattr(statement.excluded, field) for field in update_fields},
@@ -133,6 +177,11 @@ def _upsert_many(
             MonitoringModelAccuracy.run_id.in_(run_ids)
         )
     )
+    session.execute(
+        delete(MonitoringRouteLatency).where(
+            MonitoringRouteLatency.run_id.in_(run_ids)
+        )
+    )
     model_values = [
         values
         for result, run_id in zip(results, run_ids, strict=True)
@@ -141,6 +190,15 @@ def _upsert_many(
     if model_values:
         session.execute(
             dialect_insert(session, MonitoringModelAccuracy).values(model_values)
+        )
+    route_values = [
+        values
+        for result, run_id in zip(results, run_ids, strict=True)
+        for values in _route_latency_values(result, run_id)
+    ]
+    if route_values:
+        session.execute(
+            dialect_insert(session, MonitoringRouteLatency).values(route_values)
         )
     session.flush()
     return list(

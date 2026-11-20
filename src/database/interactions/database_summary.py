@@ -16,8 +16,8 @@ from src.database.models import (
     LLMUsage,
     ModelLog,
     MonitoringModelAccuracy,
+    MonitoringRouteLatency,
     MonitoringRun,
-    MonitoringModelAccuracy,
     Movie,
     RecommendationServe,
     StreamEvent,
@@ -45,6 +45,7 @@ TABLES = {
     "model_logs": ModelLog,
     "monitoring_runs": MonitoringRun,
     "monitoring_model_accuracy": MonitoringModelAccuracy,
+    "monitoring_route_latency": MonitoringRouteLatency,
 }
 
 

@@ -206,7 +206,12 @@ class CourseRequest(SQLModel, table=True):
     topic: str = Field(primary_key=True, max_length=255)
     partition_id: int = Field(primary_key=True, ge=0)
     offset_id: int = Field(primary_key=True, ge=0, sa_type=BigInteger)
-    received_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False, index=True)
+    received_at: datetime = Field(
+        default_factory=utc_now,
+        sa_type=DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
     raw_line: str = Field(sa_type=Text, nullable=False)
 
 
@@ -337,7 +342,41 @@ class LLMUsage(SQLModel, table=True):
 
 class MonitoringRun(SQLModel, table=True):
     __tablename__ = "monitoring_runs"
-    __table_args__ = (Index("ix_monitoring_runs_window", "window_start", "window_end"),)
+    __table_args__ = (
+        CheckConstraint("request_count >= 0", name="ck_monitoring_request_count"),
+        CheckConstraint(
+            "request_count_over_600ms >= 0 AND "
+            "request_count_over_600ms <= request_count",
+            name="ck_monitoring_slow_request_count",
+        ),
+        CheckConstraint(
+            "(request_count = 0 AND request_latency_average_ms IS NULL AND "
+            "request_latency_p50_ms IS NULL AND request_latency_p95_ms IS NULL AND "
+            "request_latency_p99_ms IS NULL AND request_latency_maximum_ms IS NULL) OR "
+            "(request_count > 0 AND request_latency_average_ms >= 0 AND "
+            "request_latency_p50_ms >= 0 AND "
+            "request_latency_p50_ms <= request_latency_p95_ms AND "
+            "request_latency_p95_ms <= request_latency_p99_ms AND "
+            "request_latency_p99_ms <= request_latency_maximum_ms AND "
+            "request_latency_average_ms <= request_latency_maximum_ms)",
+            name="ck_monitoring_latency_shape",
+        ),
+        CheckConstraint(
+            "rating_drift_tvd IS NULL OR "
+            "(rating_drift_tvd >= 0 AND rating_drift_tvd <= 1)",
+            name="ck_monitoring_rating_drift_tvd",
+        ),
+        CheckConstraint(
+            "event_type_drift_tvd IS NULL OR "
+            "(event_type_drift_tvd >= 0 AND event_type_drift_tvd <= 1)",
+            name="ck_monitoring_event_type_drift_tvd",
+        ),
+        CheckConstraint(
+            "rating_drift_sample_count >= 0",
+            name="ck_monitoring_rating_drift_sample_count",
+        ),
+        Index("ix_monitoring_runs_window", "window_start", "window_end"),
+    )
 
     run_id: UUID = Field(default_factory=uuid4, primary_key=True)
     generated_at: datetime = Field(
@@ -357,6 +396,22 @@ class MonitoringRun(SQLModel, table=True):
     attributed_rating_count: int = Field(ge=0)
     positive_rating_count: int = Field(ge=0)
     recommendation_accuracy: float | None = Field(default=None, ge=0, le=1)
+    request_count: int = Field(default=0, ge=0)
+    request_count_over_600ms: int = Field(default=0, ge=0)
+    request_latency_average_ms: float | None = Field(default=None, ge=0)
+    request_latency_p50_ms: float | None = Field(default=None, ge=0)
+    request_latency_p95_ms: float | None = Field(default=None, ge=0)
+    request_latency_p99_ms: float | None = Field(default=None, ge=0)
+    request_latency_maximum_ms: float | None = Field(default=None, ge=0)
+    rating_drift_tvd: float | None = Field(default=None, ge=0, le=1)
+    event_type_drift_tvd: float | None = Field(default=None, ge=0, le=1)
+    rating_drift_sample_count: int = Field(default=0, ge=0)
+    event_type_baseline_counts: dict[str, int] = Field(
+        default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False)
+    )
+    event_type_recent_counts: dict[str, int] = Field(
+        default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False)
+    )
 
 
 class MonitoringModelAccuracy(SQLModel, table=True):
@@ -371,6 +426,36 @@ class MonitoringModelAccuracy(SQLModel, table=True):
     attributed_rating_count: int = Field(ge=0)
     positive_rating_count: int = Field(ge=0)
     recommendation_accuracy: float | None = Field(default=None, ge=0, le=1)
+
+
+class MonitoringRouteLatency(SQLModel, table=True):
+    __tablename__ = "monitoring_route_latency"
+    __table_args__ = (
+        CheckConstraint("request_count > 0", name="ck_route_latency_request_count"),
+        CheckConstraint(
+            "request_count_over_600ms >= 0 AND "
+            "request_count_over_600ms <= request_count",
+            name="ck_route_latency_slow_request_count",
+        ),
+        CheckConstraint(
+            "request_latency_average_ms >= 0 AND request_latency_p50_ms >= 0 AND "
+            "request_latency_p50_ms <= request_latency_p95_ms AND "
+            "request_latency_p95_ms <= request_latency_p99_ms AND "
+            "request_latency_p99_ms <= request_latency_maximum_ms AND "
+            "request_latency_average_ms <= request_latency_maximum_ms",
+            name="ck_route_latency_shape",
+        ),
+    )
+
+    run_id: UUID = Field(foreign_key="monitoring_runs.run_id", primary_key=True)
+    model_route: str = Field(primary_key=True, max_length=100)
+    request_count: int = Field(ge=1)
+    request_count_over_600ms: int = Field(ge=0)
+    request_latency_average_ms: float = Field(ge=0)
+    request_latency_p50_ms: float = Field(ge=0)
+    request_latency_p95_ms: float = Field(ge=0)
+    request_latency_p99_ms: float = Field(ge=0)
+    request_latency_maximum_ms: float = Field(ge=0)
 
 
 class ColdStartProfile(SQLModel, table=True):
@@ -447,48 +532,87 @@ class Experiment(SQLModel, table=True):
     experiment_id: UUID = Field(default_factory=uuid4, primary_key=True)
     name: str = Field(max_length=255)
     status: str = Field(default="draft", max_length=20)
-    created_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
-    updated_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
+    created_at: datetime = Field(
+        default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
+    )
+    updated_at: datetime = Field(
+        default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
+    )
     starts_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     ends_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     control_policy: str = Field(max_length=255)
     control_version: str = Field(max_length=255)
     treatment_policy: str = Field(max_length=255)
     treatment_version: str = Field(max_length=255)
-    traffic_allocation: Decimal = Field(default=Decimal("0"), max_digits=7, decimal_places=6, ge=0, le=1)
-    treatment_allocation: Decimal = Field(default=Decimal("0.5"), max_digits=7, decimal_places=6, ge=0, le=1)
-    config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False))
+    traffic_allocation: Decimal = Field(
+        default=Decimal("0"), max_digits=7, decimal_places=6, ge=0, le=1
+    )
+    treatment_allocation: Decimal = Field(
+        default=Decimal("0.5"), max_digits=7, decimal_places=6, ge=0, le=1
+    )
+    config: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False)
+    )
 
 
 class ExperimentAssignment(SQLModel, table=True):
     __tablename__ = "experiment_assignments"
     __table_args__ = (
-        UniqueConstraint("experiment_id", "user_id", name="uq_experiment_assignments_experiment_user"),
-        CheckConstraint("variant IN ('control', 'treatment')", name="ck_experiment_assignment_variant"),
-        Index("ix_experiment_assignments_experiment_variant_assigned", "experiment_id", "variant", "assigned_at"),
+        UniqueConstraint(
+            "experiment_id", "user_id", name="uq_experiment_assignments_experiment_user"
+        ),
+        CheckConstraint(
+            "variant IN ('control', 'treatment')",
+            name="ck_experiment_assignment_variant",
+        ),
+        Index(
+            "ix_experiment_assignments_experiment_variant_assigned",
+            "experiment_id",
+            "variant",
+            "assigned_at",
+        ),
     )
 
     assignment_id: UUID = Field(default_factory=uuid4, primary_key=True)
     experiment_id: UUID = Field(foreign_key="experiments.experiment_id")
     user_id: str = Field(foreign_key="users.user_id", max_length=255, index=True)
     variant: str = Field(max_length=20)
-    assigned_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
+    assigned_at: datetime = Field(
+        default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
+    )
 
 
 class ExperimentReport(SQLModel, table=True):
     __tablename__ = "experiment_reports"
     __table_args__ = (
-        CheckConstraint("window_end > window_start", name="ck_experiment_report_window"),
-        CheckConstraint("status IN ('provisional', 'final', 'insufficient_data', 'failed')", name="ck_experiment_report_status"),
-        CheckConstraint("length(trim(analysis_version)) > 0", name="ck_experiment_report_analysis_version"),
-        Index("ix_experiment_reports_experiment_window", "experiment_id", "window_start", "window_end"),
+        CheckConstraint(
+            "window_end > window_start", name="ck_experiment_report_window"
+        ),
+        CheckConstraint(
+            "status IN ('provisional', 'final', 'insufficient_data', 'failed')",
+            name="ck_experiment_report_status",
+        ),
+        CheckConstraint(
+            "length(trim(analysis_version)) > 0",
+            name="ck_experiment_report_analysis_version",
+        ),
+        Index(
+            "ix_experiment_reports_experiment_window",
+            "experiment_id",
+            "window_start",
+            "window_end",
+        ),
     )
 
     report_id: UUID = Field(default_factory=uuid4, primary_key=True)
     experiment_id: UUID = Field(foreign_key="experiments.experiment_id")
-    generated_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False)
+    generated_at: datetime = Field(
+        default_factory=utc_now, sa_type=DateTime(timezone=True), nullable=False
+    )
     window_start: datetime = Field(sa_type=DateTime(timezone=True), nullable=False)
     window_end: datetime = Field(sa_type=DateTime(timezone=True), nullable=False)
     status: str = Field(default="provisional", max_length=30)
-    results: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False))
+    results: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False)
+    )
     analysis_version: str = Field(max_length=255)

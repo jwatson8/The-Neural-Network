@@ -78,6 +78,67 @@ class LLMSummary(BaseModel):
         return self
 
 
+class RouteLatencySummary(BaseModel):
+    """Five-minute successful-request latency for one serving route."""
+
+    model_route: str = Field(min_length=1, max_length=100)
+    request_count: int = Field(default=0, ge=0)
+    request_count_over_600ms: int = Field(default=0, ge=0)
+    average_ms: float | None = Field(default=None, ge=0)
+    p50_ms: float | None = Field(default=None, ge=0)
+    p95_ms: float | None = Field(default=None, ge=0)
+    p99_ms: float | None = Field(default=None, ge=0)
+    maximum_ms: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def check_distribution(self):
+        if self.request_count_over_600ms > self.request_count:
+            raise ValueError("request_count_over_600ms cannot exceed request_count")
+        statistics = (
+            self.average_ms,
+            self.p50_ms,
+            self.p95_ms,
+            self.p99_ms,
+            self.maximum_ms,
+        )
+        if self.request_count == 0:
+            if self.request_count_over_600ms or any(
+                value is not None for value in statistics
+            ):
+                raise ValueError("empty latency summaries cannot contain statistics")
+            return self
+        if any(value is None for value in statistics):
+            raise ValueError("latency statistics are required when requests exist")
+        if not self.p50_ms <= self.p95_ms <= self.p99_ms <= self.maximum_ms:
+            raise ValueError("latency percentiles must be ordered through maximum_ms")
+        if self.average_ms > self.maximum_ms:
+            raise ValueError("average_ms cannot exceed maximum_ms")
+        return self
+
+
+class LatencySummary(RouteLatencySummary):
+    """Overall latency plus route-level summaries for one monitoring bucket."""
+
+    model_route: str = Field(default="all", exclude=True)
+    routes: list[RouteLatencySummary] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def check_routes(self):
+        identities = [summary.model_route for summary in self.routes]
+        if len(identities) != len(set(identities)):
+            raise ValueError("routes must contain unique model_route values")
+        if any(summary.request_count == 0 for summary in self.routes):
+            raise ValueError("empty route latency summaries must be omitted")
+        if sum(summary.request_count for summary in self.routes) != self.request_count:
+            raise ValueError("route request counts must equal the overall request count")
+        if (
+            sum(summary.request_count_over_600ms for summary in self.routes)
+            != self.request_count_over_600ms
+        ):
+            raise ValueError("route slow-request counts must equal the overall count")
+        return self
+
+
 class ModelAccuracySummary(BaseModel):
     """Recommendation accuracy for one serving route and model version."""
 
@@ -153,6 +214,7 @@ class MonitorResult(BaseModel):
     licensing: LicensingSummary
     llm: LLMSummary
     quality: QualitySummary
+    latency: LatencySummary = Field(default_factory=LatencySummary)
 
     @field_validator("generated_at")
     @classmethod

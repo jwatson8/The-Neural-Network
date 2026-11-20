@@ -9,10 +9,12 @@ from src.monitoring.schemas import (
     EvaluationWindow,
     LicensingSummary,
     LLMSummary,
+    LatencySummary,
     ModelAccuracySummary,
     MonitoringConfig,
     MonitorResult,
     QualitySummary,
+    RouteLatencySummary,
 )
 
 
@@ -58,6 +60,51 @@ class MonitoringSchemaTests(unittest.TestCase):
             MonitoringConfig(bucket_minutes=7)
         with self.assertRaises(ValidationError):
             MonitoringConfig(reconciliation_hours=2, backfill_hours=1)
+
+    def test_latency_summary_rejects_malformed_distributions(self):
+        invalid_values = (
+            {"request_count": 0, "average_ms": 1},
+            {"request_count": 1, "request_count_over_600ms": 2},
+            {
+                "request_count": 1,
+                "average_ms": 10,
+                "p50_ms": 10,
+                "p95_ms": 9,
+                "p99_ms": 10,
+                "maximum_ms": 10,
+            },
+            {
+                "request_count": 1,
+                "average_ms": 11,
+                "p50_ms": 10,
+                "p95_ms": 10,
+                "p99_ms": 10,
+                "maximum_ms": 10,
+            },
+        )
+        for values in invalid_values:
+            with self.subTest(values=values), self.assertRaises(ValidationError):
+                RouteLatencySummary(model_route="control", **values)
+
+        route = RouteLatencySummary(
+            model_route="control",
+            request_count=1,
+            average_ms=10,
+            p50_ms=10,
+            p95_ms=10,
+            p99_ms=10,
+            maximum_ms=10,
+        )
+        with self.assertRaises(ValidationError):
+            LatencySummary(
+                request_count=1,
+                average_ms=10,
+                p50_ms=10,
+                p95_ms=10,
+                p99_ms=10,
+                maximum_ms=10,
+                routes=[route, route],
+            )
 
     def test_quality_summary_enforces_count_and_accuracy_contract(self):
         invalid_values = (

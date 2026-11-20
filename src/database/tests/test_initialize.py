@@ -9,7 +9,7 @@ from sqlalchemy import event, inspect, text
 from sqlmodel import SQLModel, create_engine
 
 from src.database.initialize import create_tables, main, verify_schema
-from src.database.migrations.add_experimentation_schema import main as migrate_main
+from src.database.migrations.apply_all import main as migrate_main
 from src.database.models import User
 
 
@@ -31,7 +31,7 @@ class InitializationTests(unittest.TestCase):
         self.assertLessEqual(set(self.statements), {"SELECT", "PRAGMA"})
 
     def test_empty_database_creation_and_repeat_startup(self):
-        with patch("src.database.migrations.add_experimentation_schema.migrate") as migration:
+        with patch("src.database.migrations.apply_all.migrate_all") as migration:
             create_tables()
             self.assertEqual(set(inspect(self.engine).get_table_names()), set(SQLModel.metadata.tables))
             self.statements.clear()
@@ -51,12 +51,12 @@ class InitializationTests(unittest.TestCase):
             connection.execute(text("CREATE TABLE recommendation_serves (request_id TEXT PRIMARY KEY)"))
         self.statements.clear()
         with patch.object(SQLModel.metadata, "create_all") as create_all, \
-                patch("src.database.migrations.add_experimentation_schema.migrate") as migration:
+                patch("src.database.migrations.apply_all.migrate_all") as migration:
             with self.assertRaisesRegex(RuntimeError, "requires an explicit migration") as error:
                 create_tables()
             create_all.assert_not_called()
             migration.assert_not_called()
-        self.assertIn("add_experimentation_schema --apply", str(error.exception))
+        self.assertIn("apply_all --apply", str(error.exception))
         self.assert_read_only()
         self.assertEqual(set(inspect(self.engine).get_table_names()), {"users", "recommendation_serves"})
         with self.engine.connect() as connection:
@@ -85,7 +85,7 @@ class InitializationTests(unittest.TestCase):
         self.assert_read_only()
 
     def test_explicit_migration_requires_apply_before_connecting(self):
-        with patch("sys.argv", ["add_experimentation_schema"]), \
+        with patch("sys.argv", ["apply_all"]), \
                 patch("src.database.database.get_engine") as get_engine, \
                 redirect_stderr(StringIO()):
             with self.assertRaises(SystemExit) as error:

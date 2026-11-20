@@ -1,0 +1,89 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Successful recommendation turnaround time. Percentiles are latency values in milliseconds.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "min": 0, "unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code",
+        "format": "time_series",
+        "rawQuery": true,
+        "rawSql": "SELECT window_end AS time, request_latency_average_ms AS \"Average\", request_latency_p50_ms AS \"p50\", request_latency_p95_ms AS \"p95\", request_latency_p99_ms AS \"p99\", request_latency_maximum_ms AS \"Maximum\" FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes' ORDER BY window_end",
+        "refId": "A"
+      }],
+      "title": "Successful Request Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Five-minute p95 successful-request latency by serving route.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "min": 0, "unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 10},
+      "id": 2,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code",
+        "format": "time_series",
+        "rawQuery": true,
+        "rawSql": "SELECT run.window_end AS time, latency.model_route AS metric, latency.request_latency_p95_ms AS value FROM monitoring_route_latency AS latency JOIN monitoring_runs AS run ON run.run_id = latency.run_id WHERE $__timeFilter(run.window_end) AND run.window_end = run.window_start + INTERVAL '5 minutes' ORDER BY time, metric",
+        "refId": "A"
+      }],
+      "title": "p95 Latency by Route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "min": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 19},
+      "id": 3,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code",
+        "format": "table",
+        "rawQuery": true,
+        "rawSql": "SELECT request_count AS \"Successful requests\" FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes' ORDER BY window_end DESC LIMIT 1",
+        "refId": "A"
+      }],
+      "title": "Latest Bucket Sample Count",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 420}, {"color": "red", "value": 600}]}, "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 19},
+      "id": 4,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code",
+        "format": "table",
+        "rawQuery": true,
+        "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(generated_at)))::double precision AS \"Seconds since success\" FROM monitoring_runs",
+        "refId": "A"
+      }],
+      "title": "Monitoring Freshness",
+      "type": "stat"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 42,
+  "tags": ["monitoring", "latency"],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Request Latency",
+  "uid": "request-latency",
+  "version": 1
+}
