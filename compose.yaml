@@ -78,6 +78,7 @@ services:
 
   database-roll-up:
     <<: *service
+    profiles: [bootstrap]
     restart: "no"
     command: [python, -m, src.database.roll_up, --data-dir, /app/data]
     environment: *database-connection
@@ -178,7 +179,7 @@ services:
       retries: 6
       start_period: 30s
     depends_on:
-      database-roll-up: {condition: service_completed_successfully}
+      database-init: {condition: service_completed_successfully}
 
   cold-start-worker:
     <<: *service
