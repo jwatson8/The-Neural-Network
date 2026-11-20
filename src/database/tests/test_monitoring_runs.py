@@ -11,6 +11,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from src.database.interactions import monitoring_runs
 from src.database.models import MonitoringModelAccuracy, MonitoringRouteLatency
 from src.monitoring.schemas import (
+    DriftSummary,
     LatencySummary,
     ModelAccuracySummary,
     MonitorResult,
@@ -179,34 +180,48 @@ class MonitoringRunTests(unittest.TestCase):
         self.assertEqual(rows[0].model_route, "fallback")
         self.assertEqual(rows[0].request_count_over_600ms, 1)
 
-    def test_latency_reconciliation_preserves_future_drift_values(self):
+    def test_reconciliation_replaces_drift_values_and_preserves_other_metrics(self):
         result = self.result(generated_at=self.now)
         result.window.start = self.now - timedelta(minutes=5)
         result.window.end = self.now
-        stored = monitoring_runs.upsert_many([result])[0]
-        with Session(self.engine) as session:
-            record = session.get(type(stored), stored.run_id)
-            record.rating_drift_tvd = 0.2
-            record.event_type_drift_tvd = 0.1
-            record.rating_drift_sample_count = 50
-            record.event_type_baseline_counts = {"watch": 40, "rating": 10}
-            record.event_type_recent_counts = {"watch": 35, "rating": 15}
-            session.add(record)
-            session.commit()
+        result.drift = DriftSummary(
+            rating_drift_tvd=0.2,
+            event_type_drift_tvd=0.1,
+            rating_drift_sample_count=50,
+            event_type_baseline_counts={
+                "watch": 40, "rating": 10, "account_created": 0
+            },
+            event_type_recent_counts={
+                "watch": 35, "rating": 15, "account_created": 0
+            },
+        )
+        monitoring_runs.upsert_many([result])
 
         result.generated_at += timedelta(minutes=5)
+        result.drift = DriftSummary(
+            rating_drift_tvd=0.4,
+            event_type_drift_tvd=0.3,
+            rating_drift_sample_count=60,
+            event_type_baseline_counts={
+                "watch": 30, "rating": 20, "account_created": 1
+            },
+            event_type_recent_counts={
+                "watch": 25, "rating": 25, "account_created": 2
+            },
+        )
         reconciled = monitoring_runs.upsert_many([result])[0]
 
-        self.assertEqual(reconciled.rating_drift_tvd, 0.2)
-        self.assertEqual(reconciled.event_type_drift_tvd, 0.1)
-        self.assertEqual(reconciled.rating_drift_sample_count, 50)
+        self.assertEqual(reconciled.rating_drift_tvd, 0.4)
+        self.assertEqual(reconciled.event_type_drift_tvd, 0.3)
+        self.assertEqual(reconciled.rating_drift_sample_count, 60)
+        self.assertEqual(reconciled.total_license_cost, 1.25)
         self.assertEqual(
             reconciled.event_type_baseline_counts,
-            {"watch": 40, "rating": 10},
+            {"watch": 30, "rating": 20, "account_created": 1},
         )
         self.assertEqual(
             reconciled.event_type_recent_counts,
-            {"watch": 35, "rating": 15},
+            {"watch": 25, "rating": 25, "account_created": 2},
         )
 
 

@@ -1,0 +1,108 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Total variation distance between the prior-hour baseline and recent hour. Scores at or above 0.20 indicate drift under the worker configuration.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"thresholdsStyle": {"mode": "line"}}, "max": 1, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.2}]}, "unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code", "format": "time_series", "rawQuery": true,
+        "rawSql": "SELECT window_end AS time, rating_drift_tvd AS \"Rating TVD\", event_type_drift_tvd AS \"Event-type TVD\" FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes' ORDER BY window_end",
+        "refId": "A"
+      }],
+      "title": "Rolling Distribution Drift", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Rating events in the recent one-hour comparison window. A TVD score is null until both rating windows meet the configured minimum sample count.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "min": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+      "id": 2,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code", "format": "time_series", "rawQuery": true,
+        "rawSql": "SELECT window_end AS time, rating_drift_sample_count AS \"Recent rating events\" FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes' ORDER BY window_end",
+        "refId": "A"
+      }],
+      "title": "Rating Drift Sample Size", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Total events in the adjacent baseline and recent one-hour windows.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "min": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+      "id": 3,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code", "format": "time_series", "rawQuery": true,
+        "rawSql": "SELECT window_end AS time, COALESCE((event_type_baseline_counts->>'watch')::bigint, 0) + COALESCE((event_type_baseline_counts->>'rating')::bigint, 0) + COALESCE((event_type_baseline_counts->>'account_created')::bigint, 0) AS \"Baseline events\", COALESCE((event_type_recent_counts->>'watch')::bigint, 0) + COALESCE((event_type_recent_counts->>'rating')::bigint, 0) + COALESCE((event_type_recent_counts->>'account_created')::bigint, 0) AS \"Recent events\" FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes' ORDER BY window_end",
+        "refId": "A"
+      }],
+      "title": "Event Window Volume", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Share of recent events by the normalized stream event type.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "max": 1, "min": 0, "unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 9, "w": 16, "x": 0, "y": 18},
+      "id": 4,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code", "format": "time_series", "rawQuery": true,
+        "rawSql": "WITH counts AS (SELECT window_end, COALESCE((event_type_recent_counts->>'watch')::double precision, 0) AS watch, COALESCE((event_type_recent_counts->>'rating')::double precision, 0) AS rating, COALESCE((event_type_recent_counts->>'account_created')::double precision, 0) AS account_created FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes') SELECT window_end AS time, watch / NULLIF(watch + rating + account_created, 0) AS \"Watch\", rating / NULLIF(watch + rating + account_created, 0) AS \"Rating\", account_created / NULLIF(watch + rating + account_created, 0) AS \"Account created\" FROM counts ORDER BY window_end",
+        "refId": "A"
+      }],
+      "title": "Recent Event Composition", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "description": "Most recent baseline and recent counts, including zero-count event types.",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "min": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 9, "w": 8, "x": 16, "y": 18},
+      "id": 5,
+      "options": {"showHeader": true},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code", "format": "table", "rawQuery": true,
+        "rawSql": "SELECT COALESCE((event_type_baseline_counts->>'watch')::bigint, 0) AS \"Baseline watch\", COALESCE((event_type_recent_counts->>'watch')::bigint, 0) AS \"Recent watch\", COALESCE((event_type_baseline_counts->>'rating')::bigint, 0) AS \"Baseline rating\", COALESCE((event_type_recent_counts->>'rating')::bigint, 0) AS \"Recent rating\", COALESCE((event_type_baseline_counts->>'account_created')::bigint, 0) AS \"Baseline accounts\", COALESCE((event_type_recent_counts->>'account_created')::bigint, 0) AS \"Recent accounts\" FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes' ORDER BY window_end DESC LIMIT 1",
+        "refId": "A"
+      }],
+      "title": "Latest Event Counts", "type": "table"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 420}, {"color": "red", "value": 600}]}, "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 5, "w": 24, "x": 0, "y": 27},
+      "id": 6,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
+        "editorMode": "code", "format": "table", "rawQuery": true,
+        "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(generated_at)))::double precision AS \"Seconds since success\" FROM monitoring_runs",
+        "refId": "A"
+      }],
+      "title": "Monitoring Freshness", "type": "stat"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 42,
+  "tags": ["monitoring", "data-quality", "drift"],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Data Drift",
+  "uid": "data-drift",
+  "version": 1
+}

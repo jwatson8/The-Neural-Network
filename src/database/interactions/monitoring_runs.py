@@ -62,8 +62,11 @@ def _result_values(result: MonitorResult, run_id: UUID) -> dict[str, Any]:
         "request_latency_p95_ms": result.latency.p95_ms,
         "request_latency_p99_ms": result.latency.p99_ms,
         "request_latency_maximum_ms": result.latency.maximum_ms,
-        "event_type_baseline_counts": {},
-        "event_type_recent_counts": {},
+        "rating_drift_tvd": result.drift.rating_drift_tvd,
+        "event_type_drift_tvd": result.drift.event_type_drift_tvd,
+        "rating_drift_sample_count": result.drift.rating_drift_sample_count,
+        "event_type_baseline_counts": result.drift.event_type_baseline_counts,
+        "event_type_recent_counts": result.drift.event_type_recent_counts,
     }
 
 
@@ -158,12 +161,8 @@ def _upsert_many(
         return []
     values = [_result_values(result, _bucket_run_id(result)) for result in results]
     statement = dialect_insert(session, MonitoringRun).values(values)
-    insert_only_fields = {
-        "event_type_baseline_counts",
-        "event_type_recent_counts",
-    }
     update_fields = tuple(
-        key for key in values[0] if key != "run_id" and key not in insert_only_fields
+        key for key in values[0] if key != "run_id"
     )
     statement = statement.on_conflict_do_update(
         index_elements=["run_id"],

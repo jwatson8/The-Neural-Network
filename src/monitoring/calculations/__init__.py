@@ -1,5 +1,7 @@
 """Metric calculations for completed monitoring windows."""
 
+from src.monitoring.calculations.data_drift import calculate_data_drift_buckets
+
 from src.monitoring.calculations.license_fees import (
     calculate_license_fee_buckets,
     calculate_license_fees,
@@ -14,6 +16,7 @@ from src.monitoring.calculations.request_latency import (
 )
 
 __all__ = [
+    "calculate_data_drift_buckets",
     "calculate_license_fee_buckets",
     "calculate_license_fees",
     "calculate_live_model_accuracy",

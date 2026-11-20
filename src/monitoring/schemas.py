@@ -2,7 +2,9 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from math import isclose
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
+
+from src.data_quality.drift import EVENT_TYPES
 
 
 def _normalize_utc(value: datetime, field_name: str) -> datetime:
@@ -20,6 +22,9 @@ class MonitoringConfig(BaseModel):
     attribution_hours: int = Field(default=24, gt=0)
     positive_rating_threshold: int = Field(default=6, ge=1, le=10)
     page_size: int = Field(default=1000, ge=1, le=1000)
+    drift_window_hours: int = Field(default=1, gt=0)
+    drift_threshold: float = Field(default=0.20, ge=0, le=1)
+    drift_min_samples: int = Field(default=100, gt=0)
 
     @model_validator(mode="after")
     def check_bucket_coverage(self):
@@ -206,6 +211,33 @@ class QualitySummary(BaseModel):
         return self
 
 
+def _empty_event_type_counts() -> dict[str, int]:
+    return {event_type: 0 for event_type in EVENT_TYPES}
+
+
+class DriftSummary(BaseModel):
+    """Rating and event-type drift for adjacent rolling windows."""
+
+    rating_drift_tvd: float | None = Field(default=None, ge=0, le=1)
+    event_type_drift_tvd: float | None = Field(default=None, ge=0, le=1)
+    rating_drift_sample_count: int = Field(default=0, ge=0)
+    event_type_baseline_counts: dict[str, StrictInt] = Field(
+        default_factory=_empty_event_type_counts
+    )
+    event_type_recent_counts: dict[str, StrictInt] = Field(
+        default_factory=_empty_event_type_counts
+    )
+
+    @field_validator("event_type_baseline_counts", "event_type_recent_counts")
+    @classmethod
+    def check_event_type_counts(cls, counts: dict[str, int]):
+        if set(counts) != set(EVENT_TYPES):
+            raise ValueError("event type counts must contain every supported event type")
+        if any(isinstance(count, bool) or count < 0 for count in counts.values()):
+            raise ValueError("event type counts must be nonnegative integers")
+        return {event_type: counts[event_type] for event_type in EVENT_TYPES}
+
+
 class MonitorResult(BaseModel):
     """Complete monitoring payload for one evaluation window."""
 
@@ -215,6 +247,7 @@ class MonitorResult(BaseModel):
     llm: LLMSummary
     quality: QualitySummary
     latency: LatencySummary = Field(default_factory=LatencySummary)
+    drift: DriftSummary = Field(default_factory=DriftSummary)
 
     @field_validator("generated_at")
     @classmethod
