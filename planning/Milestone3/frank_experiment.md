@@ -6,8 +6,6 @@ We deployed a **user-level randomized A/B experiment** in the production recomme
 
 **Production verification (November 19 PT / November 20 UTC).** The API returned HTTP 200 with experiment models ready. Two test users each made two successful requests, retaining **one assignment per user** and producing **4/4 assignment-linked serves**. Treatment routing and exposure records were verified across all three recommendation routes; a targeted SVD request returned 20 recommendations using `cost_aware:collaborative_svd`. The statistical reporting CLI also completed a dry run successfully. These checks verify experiment execution and instrumentation, not treatment effectiveness.
 
-**Implementation:** [user assignment](src/database/interactions/experiment_assignments.py) · [serving and exposure logging](src/service/api.py) · [reporting CLI](src/experimentation/report_cli.py) · [statistical analysis](src/experimentation/reporting.md).
-
 ## Experiment Results
 
 The production A/B experiment was activated on November 20, 2026, with **5% traffic enrollment** and a **50/50 Control–Treatment split**. Production end-to-end tests confirmed stable user assignments, successful recommendation serving, and exposure logging across SVD, LLM-content, and popularity-fallback routes.
