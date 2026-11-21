@@ -1,168 +1,102 @@
-# Milestone 3 report
+# Model version switching
 
-> Draft for team review. Production evidence still needed is identified below.
-
-## Model version switching
-
-Our Flask API uses an in-process model registry and router to serve registered
-versions in one Gunicorn worker with four threads. Experiment arms can pin
-different versions while other requests use the current default. The licensing
-experiment instead pins both arms to `m0-svd-v1` and changes the ranking policy.
+Our Flask API uses an in-process router and model registry to serve multiple
+registered model versions from one Gunicorn worker with four threads. Experiment
+settings pin Control and Treatment to their chosen versions; other requests use
+the current default. Pins stay fixed when the default changes. The licensing
+experiment currently uses the same underlying model in both arms, with a different
+ranking policy in Treatment; this differs from comparing two retrained models.
 
 ```text
-HTTP request -> request snapshot -> Control pin / Treatment pin / default
-artifacts -> background loader -> validate and warm -> atomic default swap
-                                                   -> existing requests finish on old snapshot
+HTTP :8082 -> Flask handler -> request snapshot -> experiment router
+                                                | Control pin -> model A
+                                                | Treatment pin -> model B + policy
+                                                | otherwise -> default model
+artifacts/ -> background loader -> validate + warm -> atomically replace default
+              old requests retain their original model until they finish
 ```
 
-The VM's model artifacts are mounted read-only into the API. A promotion
-publishes an activation instruction with the candidate version, checksum and
-expected previous model. The loader validates and warms the candidate before
-publishing a new snapshot; failed loading retains the old model and failed
-post-activation verification triggers rollback. Pins do not change with the
-default. Unlike Milestone 1's single model loaded at startup, model-only
-updates do not require an API restart or image rebuild. Code deployments can
-still interrupt service, and the single API process is a shared failure point.
+The VM's `artifacts/` directory is mounted read-only at `/inputs` in the API.
+Models are external files, not baked into the image. A promotion publishes an
+activation manifest identifying the version, checksum, and expected previous
+model. The background loader verifies and warms the candidate while the current
+model serves requests, then publishes one complete serving snapshot. Each request
+keeps its snapshot through inference and logging. Failed loading retains the
+current model; failed post-activation verification triggers rollback.
 
-Implementation: [registry](src/service/model_registry.py),
-[router](src/service/experiment_routing.py),
-[promotion and rollback](deployment/daily_model.sh), and [Compose](compose.yaml).
+Milestone 1 loaded a single model at startup. The registry and router now allow
+model-only updates without rebuilding the image or restarting the API. Code
+deployments can still interrupt the single API process. This design keeps
+deployment simple but shares memory and a failure point across versions.
 
-## Regular model updates
+Implementation: [registry and loader](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/src/service/model_registry.py),
+[request handling](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/src/service/api.py),
+[router](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/src/service/experiment_routing.py),
+[promotion and rollback](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/deployment/daily_model.sh),
+[external mount](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/compose.yaml).
 
-An [hourly workflow](.github/workflows/daily-model.yml) schedules candidates
-subject to quality, latency and drift gates. The
-[November 20 attempt](https://github.com/jwatson8/The-Neural-Network/actions/runs/44693525057)
-retained the original model; its 29/29 successful local probes do not demonstrate
-a switch. The later
-[November 21 scheduler check](https://github.com/jwatson8/The-Neural-Network/actions/runs/44863731640/job/136722651332)
-reported `not_due` and identified the last attempt as `not_promoted`.
+# Regular model updates
 
-**Evidence still required:** two promotions in the 72 hours before submission,
-with version changes, timestamps, `promotion.json`, corresponding
-`continuity-*.json` and course-log availability. Local
-[continuity probes](deployment/observe_update.py) alone are not course-wide
-availability. See also [training](src/model_updates/daily.py) and the
-[promotion policy](src/model_updates/policy.py).
+An [hourly GitHub Actions trigger](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/.github/workflows/daily-model.yml)
+uses persisted VM state to enforce 24 hours between attempts. Each attempt
+evaluates the previous Eastern calendar day, combining the original dataset with
+a bounded sample of recent interactions. A candidate is compared with the serving
+model on held-out ratings. Passing the accuracy, latency, and drift gates permits
+a final refit and automatic activation without restarting the API.
+Implementation: [scheduler](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/deployment/scheduled_update.py),
+[training](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/src/model_updates/daily.py),
+[promotion policy](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/src/model_updates/policy.py),
+[continuity probes](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/deployment/observe_update.py).
 
-## Monitoring
+**Production evidence to finalize:** We will attach two completed promotions within the
+72 hours before submission, with version changes, timestamps, continuity reports,
+and course-log availability. The [November 20 attempt](https://github.com/jwatson8/The-Neural-Network/actions/runs/44693525057)
+retained the original model because of insufficient data; its 29/29 successful
+local probes do not demonstrate a model switch.
+# Provenance
 
-The [monitoring worker](src/monitoring/monitoring_worker.py) aggregates
-PostgreSQL telemetry into five-minute `monitoring_runs` buckets; Grafana reads
-these and Healthchecks.io receives worker heartbeats. We monitor course-log
-HTTP 200 availability, failed requests, traffic and latency; the rolling
-24-hour share of attributed ratings **at least 6** by route and model; licensing
-charges and estimated LLM token costs; and rating and event-type distribution
-drift using total variation distance. Rating attribution uses a user/movie/time
-heuristic and does not establish a causal effect.
+Each successful recommendation receives a request UUID. PostgreSQL
+`recommendation_serves` stores that UUID, serving time, actual `model_version`,
+ranking route, and ordered movie IDs. HTTP headers expose `X-Request-ID`,
+`X-Model-Version-ID`, and `X-Model-SHA256`; the application log records the same
+identity. The API captures one serving snapshot per request, so a concurrent
+switch cannot change which model is credited for the result.
 
-The actionable [monitoring-worker-stale alert](src/monitoring/grafana/provisioning/alerting/operational-rules.yaml)
-fires when the latest saved run is over 600 seconds old for five minutes.
-Grafana's [notification policy](src/monitoring/grafana/provisioning/alerting/notifications.yaml)
-routes alerts to the team's Discord channel via webhook; a responder checks
-monitoring freshness and API health. The drill below documents its delivery.
-Other rules cover stopped traffic, low availability, failed monitoring, high
-latency, low quality, drift and licensing budget. Healthchecks.io provides a
-missing-heartbeat alert.
+The model registry binds each version label to an immutable SHA-256 checksum.
+Artifact bytes live at `artifacts/models/<artifact-sha256>.joblib`; a JSON
+registration named with the SHA-256 of the **version label** links those bytes to
+training provenance. Reusing a version label for different bytes is rejected.
+New training records `git_commit_sha` from the training image's baked
+`build-revision.txt`, a Python-source checksum, and library versions. The Git
+commit identifies the pipeline and learning algorithm; deploying newer serving
+code does not change the training commit.
 
-[Dashboard access instructions](src/monitoring/grafana/README.md) describe the
-SSH tunnel; provide mentor access privately. The following captures show the
-required metrics, not seven-day availability. For the required window, collect
-course-side evidence for the 72 hours before and 96 hours after submission;
-request success percentages alone do not establish total downtime in hours.
+For daily models, `training_data_snapshot` identifies the frozen PostgreSQL
+snapshot at `artifacts/daily/<day>/snapshot.json.gz`, the retained original CSVs
+under `artifacts/training-data/<checksum>/`, and their checksums. It also records
+the event cutoff, deduplication, metadata policy, and sampling caps. Training uses
+the original history plus up to 100,000 selected events from the preceding seven
+days and up to 100,000 from the held-out day and attribution tail; the final
+refit excludes events at or after the day's end. Thus the manifest identifies a
+bounded sample, not every production interaction. The database checksum covers
+uncompressed JSON bytes; original-file checksums cover the compressed CSV files.
 
-![Availability and failed requests](planning/Milestone3/evidence/availability_dashboard.png)
-![Model accuracy](planning/Milestone3/evidence/model_accuracy_dashboard.png)
-![Licensing and estimated LLM costs](planning/Milestone3/evidence/live_costs_dashboard.png)
-![Data drift](planning/Milestone3/evidence/data_drift_dashboard.png)
+To investigate a past recommendation, find its UUID in the response or application
+log, then run the [trace command](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/src/model_updates/trace.py)
+on the team's VM:
 
-Additional views: [latency](planning/Milestone3/evidence/request_latency_dashboard.png)
-and [traffic](planning/Milestone3/evidence/request_traffic_dashboard.png).
+```sh
+cd /home/the-neural-network
+docker compose -p the-neural-network exec -T api python -m src.model_updates.trace 63fbf04e-125e-4b4c-be73-017dbba79f6e
+```
 
-## Experimentation infrastructure
+This resolves the stored version to its registration, verifies the model and
+retained training-file checksums, and prints the training commit and input
+manifest. Course staff with VM access can inspect the files it names and open
+`https://github.com/jwatson8/The-Neural-Network/tree/<git_commit_sha>`.
 
-The production user-level A/B experiment enrolls 5% of eligible users, with
-an expected 50/50 split. Separate deterministic hashes select enrollment and
-variant; a unique PostgreSQL assignment keeps each enrolled user in the same
-group. Control uses the existing ranking; Treatment reranks candidates with
-`adjusted_score = percentile_relevance - 0.15 * normalized_cost`, using catalog
-license prices. Both arms use the pinned `m0-svd-v1` bundle, isolating the
-ranking policy rather than comparing separately trained models. Treatment
-supports SVD, LLM-content and popularity-fallback routes.
-
-Fulfilled serves log assignment, request ID, route and actual model version.
-The primary outcome is actual ledger licensing cost per **assigned user**,
-including users without activity when completeness is verified. Post-assignment
-ratings, watches and charges are analyzed by assigned user, not linked to a
-specific recommendation; they can include organic activity. Average rating
-among raters is secondary, alongside rating participation, because who rates
-may differ between arms. Missing ingestion or billing coverage prevents a valid
-all-user cost estimate rather than implying zero cost.
-
-The report compares user-level means using a two-sided Welch t-test and 95%
-confidence interval, allowing unequal variances and group sizes; an independent
-user bootstrap interval checks robustness to skew. Fisher's exact test and a
-Newcombe-Wilson interval compare binary participation. User-level analysis
-avoids treating repeated requests as independent. Small samples and skew can
-still make intervals unreliable, and nonsignificance does not establish equal
-quality. Reports are provisional until coverage and other completeness checks
-pass; repeated looks are not automatically valid sequential tests.
-
-Production checks recorded sticky assignments and 4/4 assignment-linked serves
-across repeated test requests, plus treatment execution across all three routes.
-An SVD request returned 20 recommendations using
-`cost_aware:collaborative_svd`, and the reporting CLI completed a dry run.
-These checks establish instrumentation, not effectiveness.
-Implementation: [assignment](src/experimentation/assignment.py),
-[serving](src/service/api.py), [reranking](src/experimentation/cost_aware_reranking.md),
-[reporting](src/experimentation/reporting.md), and
-[statistics](src/experimentation/statistics.py).
-
-## Experiment results
-
-The question is whether cost-aware ranking lowers actual licensing cost without
-unacceptable changes in user ratings. In the initial November 20, 2026 snapshot
-(03:58:47–04:05:54 UTC), 29 Control and 35 Treatment users were assigned.
-Both groups had zero **known recorded** charges and zero observed raters.
-Ingestion and billing completeness was unverified, so actual cost per user,
-rating differences and their uncertainty could not be estimated. The experiment
-was not complete; these observations do not establish savings or unchanged
-satisfaction.
-
-![Initial production experiment report](planning/Milestone3/evidence/experiment_result.png)
-
-Separately, a [historical offline diagnostic](src/experimentation/cost_aware_reranking.md#historical-sample-interpretation)
-at the same weight found a 3.93% lower **catalog reference cost per slate** for
-100 sampled SVD users, with a mean percentile-relevance loss of 0.000823.
-This is an in-sample ranking proxy, not an observed licensing saving or user
-rating result, and cannot answer the online experiment question.
-
-**Evidence still required:** a completed outcome report showing cost and rating
-results with uncertainty and verified data coverage. The
-[reporting instructions](src/experimentation/reporting.md#cli-and-worker) show
-how to generate a report for an authorized database and observation window.
-
-## Provenance
-
-Each successful recommendation has a request UUID and a PostgreSQL
-`recommendation_serves` record containing its actual model version, time,
-route and returned movie IDs. Response headers expose the request ID, model
-version and artifact SHA-256. A request retains its model snapshot through
-inference and audit.
-
-The registry binds a version label to an immutable model digest and training
-metadata. New training records the image's Git commit, source checksum,
-library versions, cutoff and training-data manifest. Daily models retain
-original CSVs under `artifacts/training-data/<checksum>/` and the selected
-PostgreSQL snapshot under `artifacts/daily/<day>/snapshot.json.gz`. The manifest
-records sampling caps, so the snapshot is not the complete production history.
-Selection is capped at 100,000 recent events from the preceding seven days and
-100,000 from the held-out day plus attribution tail. The snapshot checksum covers
-uncompressed JSON; original-file checksums cover compressed CSVs. Model bytes,
-registrations and snapshots must be retained together on the access-controlled VM.
-
-The team's [captured example](https://github.com/jwatson8/The-Neural-Network/blob/main/planning/Milestone3/provenance.md)
-records a successful request at 00:11:21 UTC on November 20, 2026:
+**Concrete captured request:** at 00:11:21 UTC on November 20, 2026, a request for
+`/recommend/1` returned HTTP 200 with:
 
 ```text
 X-Request-ID: 63fbf04e-125e-4b4c-be73-017dbba79f6e
@@ -170,57 +104,155 @@ X-Model-Version-ID: m0-svd-v1
 X-Model-SHA256: b677c103c9d64d6bbee56e11fc57df2fa3443d8414da89e7dc0a777ad1bb74a8
 ```
 
-With authorized VM access, resolve that request through its registration and
-verify the model and retained input checksums:
+These captured headers establish the served model identity.
 
-```sh
-cd /home/the-neural-network
-docker compose -p the-neural-network exec -T api python -m src.model_updates.trace 63fbf04e-125e-4b4c-be73-017dbba79f6e
-```
+Implementation: [prediction audit](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/src/service/api.py),
+[version binding](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/src/model_updates/promotion.py),
+[training identity and retained CSVs](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/src/model_updates/provenance.py),
+[snapshot selection](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/src/model_updates/snapshot.py),
+[training manifest](https://github.com/jwatson8/The-Neural-Network/blob/8e8de53d5aa60c7d3c959c279f97862fef6043fe/src/model_updates/daily.py).
+# Monitoring
+## Infrastructure
+As of Milestone 3 our project's monitoring infrastructure is robust. Our monitoring infrastructure can be found under [monitoring](../../src/monitoring/). 
 
-The [trace implementation](src/model_updates/trace.py) prints the stored training
-commit and manifest when available; the commit identifies the pipeline code, and
-the manifest identifies retained data. **A full trace of this example is still
-needed.** Older models can lack a recorded training commit or manifest, which
-cannot be reconstructed merely by deploying newer code. Historical live
-profiles and catalog values used during serving are not all archived.
-See [training provenance](src/model_updates/provenance.py),
-[snapshot selection](src/model_updates/snapshot.py) and
-[prediction logging](src/service/api.py).
+The monitoring infrastructure draws from a [PostgreSQL table as "MonitoringRun"](../../src/database/models.py) with a dedicated suite of [functions](../../src/database/interactions/monitoring_runs.py) that allow database interactions. Our [monitoring worker](../../src/monitoring/monitoring_worker.py) runs on *5* minute intervals and computes a number of [calculations](../../src/monitoring/calculations/). Those calculations  the other database tables and logs entries to `MonitoringRun`, and makes an external ping to [HealthCheck.io](../../src/monitoring/healthchecks.py). That table is then read by [Grafana](../../src/monitoring/grafana/), to populate several [dashboards](../../src/monitoring/grafana/dashboards/). 
 
-## Incident response plan and drill
+Finally, the monitoring suite (i.e., the monitoring worker and grafana) are both [containerized](../../compose.yaml).
 
-The [incident response plan and drill protocol](planning/Milestone3/alvajoy_incident_response_plan_and_drill.md)
-assigns Alvajoy incident coordination, Nathan monitoring, Jace deployment and
-rollback, and Frank data and experiment assessment. It calls for 15-minute
-status updates and post-recovery checks. Management can urgently reach the team
-via a Teams message and call, followed by the privately pinned phone contact if
-needed. The plan describes the deployed Grafana-to-Discord alert path and an
-approval-gated monitoring-worker-stale drill with an explicit restore procedure.
+## What We Monitor
+Our dashboard tracks a number of metrics including:
+### Data Drift
+We measure changes in rating distributions and Kafka event-type distributions, measured using total variation distance (TVD).
 
-**Drill:** On November 20, the team exercised its response to a deliberately
-injected failure. The **Monitoring worker is stale** alert reached the whole
-team through Discord. The team joined a Discord call, investigated and rolled
-a fix forward to the deployment to resolve the issue. The team identified
-[#67](https://github.com/jwatson8/The-Neural-Network/pull/67) as the relevant
-fix: it changed data-drift processing to use database-side event counts. The PR
-was merged at 05:26 UTC; the merge alone does not establish deployment time.
-The screenshot shows the Grafana alert firing in Discord, with the latest run
-approximately 920 seconds old. Team receipt and response are reported by a
-team member.
+![Image of data drift dashboards](../Milestone3/evidence/data_drift_dashboard.png)
 
-![Monitoring worker stale alert in Discord](planning/Milestone3/evidence/drill_discord_alert.png)
+## Model Accuracy
+We measure model quality as the share of attributed user ratings that are positive (over 6), broken down by recommendation route and model version over a rolling 24-hour window.
 
-The team identified the following heartbeat capture as recovery evidence. It
-shows the check up, but does not itself establish its time relative to the drill.
+![Image of tracking model accuracy dashboards](../Milestone3/evidence/model_accuracy_dashboard.png)
 
-![Monitoring heartbeat status](planning/Milestone3/evidence/monitoring_heartbeat_status.png)
+## Licensing and LLM Costs
+We track movie licensing charges and estimated LLM inference costs, including requests and token usage.
 
-**Evidence still required:** record the injection method, alert and deployment
-times, and verification of restored health/traffic; link deployment and
-recovery logs or screenshots.
+![Image of dashboard showing licensing and LLM costs](../Milestone3/evidence/live_costs_dashboard.png)
 
-## Team contract update
+## Latency, Traffic, and Service Availability
+We track HTTP 200 success rates, failed/unanswered requests, request traffic, p95 latency, and the fraction exceeding 600 ms.
 
-No update to team contract. The existing [team contract](planning/Milestone1/m0%20-%20meeting%20notes%20and%20team%20contract.md)
-remains in effect.
+![Image of successful monitoring pings to HealthCheck.io](../Milestone3/evidence/health_check_service.png)
+![Image of latency calculations](../Milestone3/evidence/request_latency_dashboard.png)
+![Dashboard showing request traffic](../Milestone3/evidence/request_traffic_dashboard.png)
+![Image of availability calculations dashboard](../Milestone3/evidence/availability_dashboard.png)
+
+## Alerts
+Our alert system uses Discord integration and a Webhook to send a Ping to all team members in our dedicated channel. This alert is actionable because it labels the triggering-condition. The following tables list the alert triggering conditions. Upon arrival, we initiate our response plan.
+## Service Health
+These can be found as [operational rules](../../src/monitoring/grafana/provisioning/alerting/operational-rules.yaml)
+| Alert | Trigger Condition |
+|-------|-------------------|
+| Recommendation availability is low | 3 consecutive 5-min buckets has under 70% of requests returning status 200 |
+| Recommendation traffic is stopped | 0 successful requests across 3 5-min buckets |
+| Monitoring worker is stale | No monitoring worker run is saved for 600s. Also fires if no run exists at all|
+| Monitoring Workload Failure to Record| 2 or more monitoring-run exceptions logged in last 600s|
+
+## Latency 
+These can be found in [latency rules](../../src/monitoring/grafana/provisioning/alerting/latency-rules.yaml)
+| Alert | Trigger Condition |
+|-------|-------------------|
+| Request p95 latency is high | The latest bucket has 100 or more requests and p95 latency over 600ms |
+| Slow request share is high | THe latest bucket has 100 or more requests and over 5% of them take more than 600ms|
+
+## Quality and Cost
+These can be found in [quality cost rules](../../src/monitoring/grafana/provisioning/alerting/quality-cost-rules.yaml)
+| Alert | Trigger Condition |
+|-------|-------------------|
+| Data drift detected| Rating or event distribution shift (TVD) reaches .2 or more in the latest bucket|
+| Model accuracy low| For any route, the rolling 24-hour rating-rate is under 60% with 100 or more ratings|
+| Licensing cost exceeds budget | Rolling 24-hour licensing cost goes over $125,000. This was decided based on historic averages|
+## External Dead Man Switch
+Monitoring worker pings HealthCheck.io. The service alerts our discord if it doesn't receive a ping every 5 mins (with a 10 min grace period)
+
+# Experimentation Infrastructure
+
+We deployed a **user-level randomized A/B experiment** in the production recommendation API to evaluate the impact of cost-aware reranking on licensing costs and user satisfaction. **5% of eligible users** are enrolled, split equally between **Control** (existing ranking) and **Treatment** (cost-aware reranking, **λ = 0.15**). Deterministic hashing and PostgreSQL ensure sticky assignments. Both groups use the pinned `m0-svd-v1` model bundle, isolating the ranking policy as the experimental difference. Treatment supports **SVD, LLM-content, and popularity-fallback** routes.
+
+**Measurement and analysis.** Each fulfilled experimental request logs its assignment, route, model version, and request ID. The primary outcome is **actual licensing cost per assigned user** (intention-to-treat), while **movie ratings and rating participation** measure satisfaction. The reporting pipeline uses **Welch's t-test and confidence intervals** to compare group means, with **bootstrap confidence intervals** to account for skewed costs. It also checks ingestion and billing completeness before estimating treatment effects.
+
+**Production verification.** The API returned HTTP 200 with experiment models ready. Repeated requests confirmed **sticky assignments and 4/4 assignment-linked serves**. All three treatment routes were verified, including an SVD request returning 20 recommendations through `cost_aware:collaborative_svd`. The reporting CLI also completed a successful dry run.
+
+**Implementation:** [Experiment assignment](../../src/database/interactions/experiment_assignments.py) · [Recommendation serving and exposure logging](../../src/service/api.py) · [Statistical reporting](../../src/experimentation/reporting.py) · [Reporting CLI](../../src/experimentation/report_cli.py)
+
+## Experiment Results
+
+The experiment began on **November 20, 2026**. An initial reporting snapshot (03:58:47–04:05:54 UTC) recorded **29 Control and 35 Treatment users**, with zero known licensing charges and zero observed raters in both groups. The reporting pipeline generated a preliminary summary; complete cost and rating effects could not yet be estimated.
+
+![Production A/B experiment reporting results](../Milestone3/evidence/experiment_result.png)
+
+*Figure: Initial production A/B experiment reporting snapshot (November 20, 2026 UTC).*
+# Incident Response Plan & Drill
+
+## Overview & Objectives
+
+This document details the standard operating procedure for incident detection, escalation, communication, and rollback for the Neural Network Recommendation Service, alongside the protocol for executing a live incident drill.
+
+## Incident Response Plan
+
+
+## Detect and assess
+
+The monitoring worker writes five-minute summaries to PostgreSQL. Grafana reads
+them and evaluates the [operational](../../src/monitoring/grafana/provisioning/alerting/operational-rules.yaml),
+[latency](../../src/monitoring/grafana/provisioning/alerting/latency-rules.yaml),
+and [quality and cost](../../src/monitoring/grafana/provisioning/alerting/quality-cost-rules.yaml)
+rules. Grafana sends notifications to the team Discord alert channel through
+its [contact point](../../src/monitoring/grafana/provisioning/alerting/notifications.yaml).
+Healthchecks.io separately watches the worker heartbeat.
+
+The **Recommendation traffic stopped** rule fires when all three latest
+complete five-minute buckets have zero successful requests. The **Monitoring
+worker is stale** rule fires after the latest saved run is more than 600 seconds
+old and the condition persists for five minutes; missing data or query errors
+are configured to alert as well. A stopped worker can make traffic-based alerts
+stale, so check the worker and the external heartbeat as well as API health.
+The [dashboard access instructions](../../src/monitoring/grafana/README.md)
+explain how to connect to Grafana.
+
+On any alert, acknowledge it in the team Discord channel, record the UTC time,
+and check whether the signal reflects an API outage, missing ingestion, a
+monitoring failure or another fault. Check `/health`, a recommendation response,
+course traffic and monitoring freshness. Do not equate missing telemetry with
+healthy service.
+
+## Urgent contact and responsibilities
+
+Management or the mentor should send an urgent message to the team in Microsoft
+Teams and initiate a Teams call. If no one responds, call a team member using the
+phone number pinned in the team's Teams chat. The incident lead confirms receipt
+and opens a Discord incident thread; escalate an unresolved severe outage to
+course staff through the established course channels after 30 minutes. Contact
+details and credentials stay in private team channels, not this public document.
+
+| Role | Responsibility |
+|---|---|
+| Alvajoy, incident lead | Coordinate response, decide on recovery, record timeline and update stakeholders. |
+| Nathan, monitoring lead | Inspect Grafana, course logs and heartbeat; verify alert delivery and recovery. |
+| Jace, deployment lead | Inspect service and deployment state; carry out approved recovery or rollback. |
+| Frank, data and experiment lead | Check ingestion, data quality, licensing and experiment impact. |
+
+If a named lead is unavailable, the incident lead assigns an available team
+member as backup. Post the incident, owner, impact, current action and next
+update in the Discord thread; update every 15 minutes. Inform management when
+impact, mitigation or expected recovery changes.
+
+## Recovery
+
+Diagnose before changing production. For a bad model promotion, use the
+documented date-specific [rollback procedure](../../deployment/DAILY_MODELS.md#approve-promote-and-recover)
+and verify activation acknowledgement, the actual model digest and a valid
+recommendation. For a code or container failure, follow the
+[deployment recovery procedure](../../deployment/CI_CD.md#deploy-a-release);
+do not remove volumes or flush queues as a generic recovery step. If monitoring
+is down, restore its worker and verify fresh runs and heartbeat delivery.
+After mitigation, confirm valid recommendation responses, course traffic,
+latency and monitoring freshness, then document impact, root cause, actions,
+recovery time and follow-up owners.
