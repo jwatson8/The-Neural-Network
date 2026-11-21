@@ -21,6 +21,7 @@ Our dashboard tracks a number of metrics including:
 ![Image of successful monitoring pings to HealthCheck.io](../Milestone3/evidence/health_check_service.png)
 ![Image of latency calculations](../Milestone3/evidence/request_latency_dashboard.png)
 ![Dashboard showing request traffic](../Milestone3/evidence/request_traffic_dashboard.png)
+![Image of availability calculations dashboard](./evidence/availability_dashboard.png)
 ## Alerts
 Our alert system uses Discord integration and a Webhook to send a Ping to all team members in our dedicated channel.
 ## Service Health
