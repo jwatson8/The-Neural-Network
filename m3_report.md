@@ -42,7 +42,8 @@ reported `not_due` and identified the last attempt as `not_promoted`.
 with version changes, timestamps, `promotion.json`, corresponding
 `continuity-*.json` and course-log availability. Local
 [continuity probes](deployment/observe_update.py) alone are not course-wide
-availability.
+availability. See also [training](src/model_updates/daily.py) and the
+[promotion policy](src/model_updates/policy.py).
 
 ## Monitoring
 
@@ -75,6 +76,9 @@ request success percentages alone do not establish total downtime in hours.
 ![Licensing and estimated LLM costs](planning/Milestone3/evidence/live_costs_dashboard.png)
 ![Data drift](planning/Milestone3/evidence/data_drift_dashboard.png)
 
+Additional views: [latency](planning/Milestone3/evidence/request_latency_dashboard.png)
+and [traffic](planning/Milestone3/evidence/request_traffic_dashboard.png).
+
 ## Experimentation infrastructure
 
 The production user-level A/B experiment enrolls 5% of eligible users, with
@@ -106,6 +110,8 @@ pass; repeated looks are not automatically valid sequential tests.
 
 Production checks recorded sticky assignments and 4/4 assignment-linked serves
 across repeated test requests, plus treatment execution across all three routes.
+An SVD request returned 20 recommendations using
+`cost_aware:collaborative_svd`, and the reporting CLI completed a dry run.
 These checks establish instrumentation, not effectiveness.
 Implementation: [assignment](src/experimentation/assignment.py),
 [serving](src/service/api.py), [reranking](src/experimentation/cost_aware_reranking.md),
@@ -150,8 +156,10 @@ library versions, cutoff and training-data manifest. Daily models retain
 original CSVs under `artifacts/training-data/<checksum>/` and the selected
 PostgreSQL snapshot under `artifacts/daily/<day>/snapshot.json.gz`. The manifest
 records sampling caps, so the snapshot is not the complete production history.
-Model bytes, registrations and snapshots must be retained together on the
-access-controlled VM.
+Selection is capped at 100,000 recent events from the preceding seven days and
+100,000 from the held-out day plus attribution tail. The snapshot checksum covers
+uncompressed JSON; original-file checksums cover compressed CSVs. Model bytes,
+registrations and snapshots must be retained together on the access-controlled VM.
 
 The team's [captured example](https://github.com/jwatson8/The-Neural-Network/blob/main/planning/Milestone3/provenance.md)
 records a successful request at 00:11:21 UTC on November 20, 2026:
