@@ -2,7 +2,7 @@
 ## Infrastructure
 As of Milestone 3 our project's monitoring infrastructure is robust. Our monitoring infrastructure can be found under [monitoring](../../src/monitoring/). 
 
-The monitoring infrastructure is housed within a [PostgresSQL table as "MonitoringRun"](../../src/database/models.py) with a dedicated suite of [functions](../../src/database/interactions/monitoring_runs.py) that allow database interactions. Our [monitoring worker](../../src/monitoring/monitoring_worker.py) runs on *5* minunite intervals and computes a number of [calculations](../../src/monitoring/calculations/). Those calculations querry the other database tables and logs entries to `MonitoringRun`, and makes an external ping to [HealthCheck.io](../../src/monitoring/healthchecks.py). That table is then read by [Grafana](../../src/monitoring/grafana/), to populate several [dashboards](../../src/monitoring/grafana/dashboards/). 
+The monitoring infrastructure draws from a [PostgresSQL table as "MonitoringRun"](../../src/database/models.py) with a dedicated suite of [functions](../../src/database/interactions/monitoring_runs.py) that allow database interactions. Our [monitoring worker](../../src/monitoring/monitoring_worker.py) runs on *5* minunite intervals and computes a number of [calculations](../../src/monitoring/calculations/). Those calculations querry the other database tables and logs entries to `MonitoringRun`, and makes an external ping to [HealthCheck.io](../../src/monitoring/healthchecks.py). That table is then read by [Grafana](../../src/monitoring/grafana/), to populate several [dashboards](../../src/monitoring/grafana/dashboards/). 
 
 Finally, the monitoring suite (i.e., the monitoring worker and grafana) are both [containerized](../../compose.yaml).
 
