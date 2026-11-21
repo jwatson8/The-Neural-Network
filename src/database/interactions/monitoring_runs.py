@@ -67,6 +67,10 @@ def _result_values(result: MonitorResult, run_id: UUID) -> dict[str, Any]:
         "rating_drift_sample_count": result.drift.rating_drift_sample_count,
         "event_type_baseline_counts": result.drift.event_type_baseline_counts,
         "event_type_recent_counts": result.drift.event_type_recent_counts,
+        "availability_request_count": result.availability.request_count,
+        "availability_success_count": result.availability.success_count,
+        "availability_no_response_count": result.availability.no_response_count,
+        "availability_other_failure_count": result.availability.other_failure_count,
     }
 
 

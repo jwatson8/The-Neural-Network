@@ -375,6 +375,14 @@ class MonitoringRun(SQLModel, table=True):
             "rating_drift_sample_count >= 0",
             name="ck_monitoring_rating_drift_sample_count",
         ),
+        CheckConstraint(
+            "availability_success_count >= 0 AND "
+            "availability_no_response_count >= 0 AND "
+            "availability_other_failure_count >= 0 AND "
+            "availability_success_count + availability_no_response_count + "
+            "availability_other_failure_count = availability_request_count",
+            name="ck_monitoring_availability_counts",
+        ),
         Index("ix_monitoring_runs_window", "window_start", "window_end"),
     )
 
@@ -412,6 +420,10 @@ class MonitoringRun(SQLModel, table=True):
     event_type_recent_counts: dict[str, int] = Field(
         default_factory=dict, sa_column=Column(JSON_DOCUMENT, nullable=False)
     )
+    availability_request_count: int = Field(default=0, ge=0)
+    availability_success_count: int = Field(default=0, ge=0)
+    availability_no_response_count: int = Field(default=0, ge=0)
+    availability_other_failure_count: int = Field(default=0, ge=0)
 
 
 class MonitoringModelAccuracy(SQLModel, table=True):

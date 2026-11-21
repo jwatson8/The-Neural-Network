@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from src.monitoring import workload
 from src.monitoring.schemas import (
+    AvailabilitySummary,
     DriftSummary,
     LicensingSummary,
     LLMSummary,
@@ -40,6 +41,9 @@ class MonitoringWorkloadTests(unittest.TestCase):
         )
         self.latency = LatencySummary()
         self.drift = DriftSummary()
+        self.availability = AvailabilitySummary(
+            request_count=4, success_count=3, no_response_count=1
+        )
 
     def _summaries(self, value):
         return lambda windows, _config: {window.start: value for window in windows}
@@ -69,6 +73,10 @@ class MonitoringWorkloadTests(unittest.TestCase):
             "calculate_data_drift_buckets",
             side_effect=self._summaries(self.drift),
         ), patch.object(
+            workload,
+            "calculate_availability_buckets",
+            side_effect=self._summaries(self.availability),
+        ), patch.object(
             workload.monitoring_runs, "upsert_many", return_value=saved
         ) as upsert:
             returned = workload.run_monitoring_workload(self.config)
@@ -80,6 +88,9 @@ class MonitoringWorkloadTests(unittest.TestCase):
         self.assertEqual(results[-1].window.end, datetime(2026, 1, 1, 2, tzinfo=UTC))
         self.assertTrue(all(result.generated_at == self.now for result in results))
         self.assertTrue(all(result.drift == self.drift for result in results))
+        self.assertTrue(
+            all(result.availability == self.availability for result in results)
+        )
 
     def test_existing_history_still_reconciles_only_the_latest_hour(self):
         config = MonitoringConfig(backfill_hours=2)

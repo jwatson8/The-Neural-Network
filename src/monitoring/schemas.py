@@ -238,6 +238,28 @@ class DriftSummary(BaseModel):
         return {event_type: counts[event_type] for event_type in EVENT_TYPES}
 
 
+class AvailabilitySummary(BaseModel):
+    """Client-observed request outcomes from the course request log.
+
+    ``no_response_count`` is course status 0 (timeout or connection failure);
+    ``other_failure_count`` is any other non-200 or unrecognized status.
+    """
+
+    request_count: int = Field(default=0, ge=0)
+    success_count: int = Field(default=0, ge=0)
+    no_response_count: int = Field(default=0, ge=0)
+    other_failure_count: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def check_outcomes(self):
+        outcomes = (
+            self.success_count + self.no_response_count + self.other_failure_count
+        )
+        if outcomes != self.request_count:
+            raise ValueError("request outcomes must sum to request_count")
+        return self
+
+
 class MonitorResult(BaseModel):
     """Complete monitoring payload for one evaluation window."""
 
@@ -248,6 +270,7 @@ class MonitorResult(BaseModel):
     quality: QualitySummary
     latency: LatencySummary = Field(default_factory=LatencySummary)
     drift: DriftSummary = Field(default_factory=DriftSummary)
+    availability: AvailabilitySummary = Field(default_factory=AvailabilitySummary)
 
     @field_validator("generated_at")
     @classmethod

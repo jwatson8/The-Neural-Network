@@ -180,3 +180,69 @@ groups:
           __panelId__: "1"
         labels: {service: recommendation-api, severity: critical}
         isPaused: false
+
+      - uid: recommendation-availability-low
+        title: Recommendation availability is low
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 1200, to: 0}
+            datasourceUid: monitoring-postgres
+            model:
+              datasource: {type: grafana-postgresql-datasource, uid: monitoring-postgres}
+              editorMode: code
+              format: table
+              intervalMs: 1000
+              maxDataPoints: 43200
+              rawQuery: true
+              rawSql: >-
+                WITH boundary AS (
+                  SELECT date_bin('5 minutes', NOW(), TIMESTAMPTZ '1970-01-01') AS bucket_end
+                ), recent AS (
+                  SELECT availability_success_count::double precision
+                    / NULLIF(availability_request_count, 0) AS availability
+                  FROM monitoring_runs CROSS JOIN boundary
+                  WHERE window_end > boundary.bucket_end - INTERVAL '15 minutes'
+                  AND window_end <= boundary.bucket_end
+                  AND window_end = window_start + INTERVAL '5 minutes'
+                )
+                SELECT CASE WHEN COUNT(availability) = 3 THEN MAX(availability) ELSE NULL END AS value
+                FROM recent
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [0.7], type: lt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: request-traffic
+        panelId: 5
+        noDataState: OK
+        execErrState: Alerting
+        for: 0s
+        annotations:
+          summary: Recommendation availability below 70% for three consecutive buckets
+          description: Each of the last three completed five-minute buckets had course-logged requests and fewer than 70% received status 200.
+          __dashboardUid__: request-traffic
+          __panelId__: "5"
+        labels: {service: recommendation-api, severity: critical}
+        isPaused: false
