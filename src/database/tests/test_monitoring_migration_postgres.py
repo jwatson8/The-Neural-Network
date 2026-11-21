@@ -159,6 +159,10 @@ class MonitoringMigrationPostgresTests(unittest.TestCase):
                 "rating_drift_sample_count",
                 "event_type_baseline_counts",
                 "event_type_recent_counts",
+                "availability_request_count",
+                "availability_success_count",
+                "availability_no_response_count",
+                "availability_other_failure_count",
             }
             <= columns
         )

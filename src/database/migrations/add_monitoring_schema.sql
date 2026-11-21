@@ -72,3 +72,19 @@ CREATE TABLE IF NOT EXISTS monitoring_route_latency (
         AND request_latency_average_ms <= request_latency_maximum_ms
     )
 );
+-- next
+ALTER TABLE monitoring_runs
+    ADD COLUMN IF NOT EXISTS availability_request_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS availability_success_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS availability_no_response_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS availability_other_failure_count INTEGER NOT NULL DEFAULT 0;
+-- next
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'monitoring_runs'::regclass AND conname = 'ck_monitoring_availability_counts') THEN
+        ALTER TABLE monitoring_runs ADD CONSTRAINT ck_monitoring_availability_counts CHECK (
+            availability_success_count >= 0 AND availability_no_response_count >= 0 AND availability_other_failure_count >= 0
+            AND availability_success_count + availability_no_response_count + availability_other_failure_count = availability_request_count
+        );
+    END IF;
+END $$;

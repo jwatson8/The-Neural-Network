@@ -1,0 +1,50 @@
+# Monitoring
+## Infrastructure
+As of Milestone 3 our project's monitoring infrastructure is robust. Our monitoring infrastructure can be found under [monitoring](../../src/monitoring/). 
+
+The monitoring infrastructure is housed within a [PostgresSQL table as "MonitoringRun"](../../src/database/models.py) with a dedicated suite of [functions](../../src/database/interactions/monitoring_runs.py) that allow database interactions. Our [monitoring worker](../../src/monitoring/monitoring_worker.py) runs on *5* minunite intervals and computes a number of [calculations](../../src/monitoring/calculations/). Those calculations querry the other database tables and logs entries to `MonitoringRun`, and makes an external ping to [HealthCheck.io](../../src/monitoring/healthchecks.py). That table is then read by [Grafana](../../src/monitoring/grafana/), to populate several [dashboards](../../src/monitoring/grafana/dashboards/). 
+
+Finally, the monitoring suite (i.e., the monitoring worker and grafana) are both [containerized](../../compose.yaml).
+
+## What We Monitor
+Our dashboard tracks a number of metrics including:
+### Data Drift
+![Image of data drift dashboards](../Milestone3/evidence/data_drift_dashboard.png)
+
+## Model Accuracy
+![Image of tracking model accuracy dashboards](../Milestone3/evidence/model_accuracy_dashboard.png)
+
+## Licensing and LLM Costs
+![Image of dashboard showing licensing and LLM costs](../Milestone3/evidence/live_costs_dashboard.png)
+
+## Latency, Traffic, and Service Availability
+![Image of successful monitoring pings to HealthCheck.io](../Milestone3/evidence/health_check_service.png)
+![Image of latency calculations](../Milestone3/evidence/request_latency_dashboard.png)
+![Dashboard showing request traffic](../Milestone3/evidence/request_traffic_dashboard.png)
+## Alerts
+Our alert system uses Discord integration and a Webhook to send a Ping to all team members in our dedicated channel.
+## Service Health
+These can be found as [operational rules](../../src/monitoring/grafana/provisioning/alerting/operational-rules.yaml)
+| Alert | Trigger Condition |
+|-------|-------------------|
+| Recomendation availability is low | 3 consecutive 5-min buckets has under 70% of requests returning status 200 |
+| Recommendation traffic is stopped | 0 successful requests across 3 5-min buckets |
+| Monitoring worker is stale | No monitoring worker run is saved for 600s. Also fires if no run exists at all|
+| Monitoring Workload Failure to Record| 2 or more monitoring-run exceptions logged in last 600s|
+
+## Latency 
+These can be found in [latency rules](../../src/monitoring/grafana/provisioning/alerting/latency-rules.yaml)
+| Alert | Trigger Condition |
+|-------|-------------------|
+| Request p95 latency is high | The latest buckest has 100 or more requests and p95 latency over 600ms |
+| Slow request share is high | THe latest bucket has 100 or more requests and over 5% of them take more than 600ms|
+
+## Quality and Cost
+These can be found in [quality cost rules](../../src/monitoring/grafana/provisioning/alerting/latency-rules.yaml)
+| Alert | Trigger Condition |
+|-------|-------------------|
+| Data drift detected| Rating or event distribution shift (TVD) reaches .2 or more in the latest bucket|
+| Model accuracy low| For any route, the rolling 24-hour rating-rate is under 60% with 100 or more ratings|
+| Licensing cost exceeds budget | Rolling 24-hour licesning cost goves over $125,000. This was decided based on historic averages|
+## External Dead Man Switch
+Monitoring worker pings HealthCheck.io. The service alerts our discord if it doesn't recieve a ping every 5 mins (with a 10 min grace period)

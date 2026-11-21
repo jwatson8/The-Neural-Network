@@ -8,7 +8,8 @@ them for Grafana. Grafana derives rolling 24-hour views from those buckets.
 ```text
 monitoring_worker
     -> workload
-    -> licensing, LLM, recommendation-quality, and request-latency calculations
+    -> licensing, LLM, recommendation-quality, request-latency, drift, and
+       availability calculations
     -> five-minute MonitorResult buckets
     -> monitoring_runs + per-route child rows
     -> Grafana
@@ -32,6 +33,17 @@ need:
   user/time lookups and JSONB movie membership.
 - `request_latency.py` calculates successful-request counts, average latency,
   p50/p95/p99, maximum latency, and the count strictly over 600 ms.
+- `data_drift.py` compares rolling one-hour rating and event-type distributions
+  from per-bucket counts aggregated in PostgreSQL.
+- `availability.py` counts course-logged recommendation requests by outcome:
+  status 200 (success), status 0 (no response: timeout or connection failure),
+  and any other status. Availability is `success / requests`.
+
+Availability uses `course_requests`, the course client's own log of every
+request, because `recommendation_serves` only records requests the API answered
+and so cannot count failures. Requests are bucketed by the UTC timestamp in the
+logged line, not by ingestion time. Buckets computed before availability existed
+keep zero counts, which Grafana shows as null rather than 0% availability.
 
 Successful buckets are inserted or updated in `monitoring_runs`. Events arriving
 within the one-hour reconciliation period update their original bucket. Failures
