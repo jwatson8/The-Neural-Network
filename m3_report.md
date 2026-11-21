@@ -256,3 +256,6 @@ is down, restore its worker and verify fresh runs and heartbeat delivery.
 After mitigation, confirm valid recommendation responses, course traffic,
 latency and monitoring freshness, then document impact, root cause, actions,
 recovery time and follow-up owners.
+
+# Team Contract Update
+ No update to team contract. Our existing team contract remains in effect; see the Milestone 2 report.
