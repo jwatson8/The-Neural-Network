@@ -8,10 +8,10 @@
   "panels": [
     {
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "monitoring-postgres"},
-      "description": "Five-minute and rolling 24-hour known licensing cost. The rolling value alerts above the provisional $125,000 budget.",
+      "description": "Five-minute and rolling 24-hour known licensing cost. The rolling value alerts above the provisional $150,000 budget.",
       "fieldConfig": {
         "defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "unit": "currencyUSD"},
-        "overrides": [{"matcher": {"id": "byName", "options": "Rolling 24-hour license cost"}, "properties": [{"id": "custom.thresholdsStyle", "value": {"mode": "line"}}, {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 125000}]}}]}]
+        "overrides": [{"matcher": {"id": "byName", "options": "Rolling 24-hour license cost"}, "properties": [{"id": "custom.thresholdsStyle", "value": {"mode": "line"}}, {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 150000}]}}]}]
       },
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
       "id": 1,

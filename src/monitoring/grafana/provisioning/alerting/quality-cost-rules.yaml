@@ -177,7 +177,7 @@ groups:
             datasourceUid: __expr__
             model:
               conditions:
-                - evaluator: {params: [125000], type: gt}
+                - evaluator: {params: [150000], type: gt}
                   operator: {type: and}
                   query: {params: [C]}
                   reducer: {params: [], type: last}
@@ -194,7 +194,7 @@ groups:
         execErrState: Alerting
         for: 10m
         annotations:
-          summary: Rolling 24-hour licensing cost exceeds $125,000
+          summary: Rolling 24-hour licensing cost exceeds $150,000
           description: Known licensing charges have remained above the provisional operating budget.
           __dashboardUid__: monitoring-overview
           __panelId__: "1"
