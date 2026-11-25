@@ -88,3 +88,25 @@ BEGIN
         );
     END IF;
 END $$;
+-- next
+ALTER TABLE monitoring_runs
+    ADD COLUMN IF NOT EXISTS kafka_record_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS rejected_invalid_encoding_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS rejected_malformed_line_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS rejected_unrecognized_event_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS rejected_invalid_user_id_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS rejected_invalid_event_time_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS rejected_invalid_field_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS rejected_unknown_movie_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS rejected_total_count INTEGER NOT NULL DEFAULT 0;
+-- next
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'monitoring_runs'::regclass AND conname = 'ck_monitoring_rejection_counts') THEN
+        ALTER TABLE monitoring_runs ADD CONSTRAINT ck_monitoring_rejection_counts CHECK (
+            kafka_record_count >= 0 AND rejected_invalid_encoding_count >= 0 AND rejected_malformed_line_count >= 0 AND rejected_unrecognized_event_count >= 0 AND rejected_invalid_user_id_count >= 0 AND rejected_invalid_event_time_count >= 0 AND rejected_invalid_field_count >= 0 AND rejected_unknown_movie_count >= 0
+            AND rejected_invalid_encoding_count + rejected_malformed_line_count + rejected_unrecognized_event_count + rejected_invalid_user_id_count + rejected_invalid_event_time_count + rejected_invalid_field_count + rejected_unknown_movie_count = rejected_total_count
+            AND rejected_total_count <= kafka_record_count
+        );
+    END IF;
+END $$;

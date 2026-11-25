@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from math import isnan
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import (
@@ -242,6 +242,17 @@ class RecommendationServeCreate(DatabaseSchema):
         return self
 
 
+RejectionReason = Literal[
+    "invalid_encoding",
+    "malformed_line",
+    "unrecognized_event",
+    "invalid_user_id",
+    "invalid_event_time",
+    "invalid_field",
+    "unknown_movie",
+]
+# Monitoring keeps one count column per reason; add a column when adding one here.
+REJECTION_REASONS: tuple[str, ...] = get_args(RejectionReason)
 RAW_LINE_LIMIT = 1024
 _DETAIL_TEXT_LIMIT = 500
 
@@ -294,15 +305,7 @@ class RejectedRequestCreate(DatabaseSchema):
     event_kind: Literal["account", "watch", "rating", "recommendation", "unknown"] = (
         "unknown"
     )
-    reason: Literal[
-        "invalid_encoding",
-        "malformed_line",
-        "unrecognized_event",
-        "invalid_user_id",
-        "invalid_event_time",
-        "invalid_field",
-        "unknown_movie",
-    ]
+    reason: RejectionReason
     user_id: str | None = None
     error_details: list[dict] = Field(default_factory=list)
     raw_line: str

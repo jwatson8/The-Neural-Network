@@ -71,6 +71,15 @@ def _result_values(result: MonitorResult, run_id: UUID) -> dict[str, Any]:
         "availability_success_count": result.availability.success_count,
         "availability_no_response_count": result.availability.no_response_count,
         "availability_other_failure_count": result.availability.other_failure_count,
+        "kafka_record_count": result.rejections.kafka_record_count,
+        "rejected_invalid_encoding_count": result.rejections.invalid_encoding_count,
+        "rejected_malformed_line_count": result.rejections.malformed_line_count,
+        "rejected_unrecognized_event_count": result.rejections.unrecognized_event_count,
+        "rejected_invalid_user_id_count": result.rejections.invalid_user_id_count,
+        "rejected_invalid_event_time_count": result.rejections.invalid_event_time_count,
+        "rejected_invalid_field_count": result.rejections.invalid_field_count,
+        "rejected_unknown_movie_count": result.rejections.unknown_movie_count,
+        "rejected_total_count": result.rejections.total_count,
     }
 
 

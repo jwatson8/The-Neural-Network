@@ -182,6 +182,10 @@ rejected_requests.create_many([
 ])
 ```
 
+The monitoring worker counts these rows per five-minute bucket, by reason, into
+`monitoring_runs`, where the Grafana **Kafka Rejections** dashboard and its alerts
+read them (see `src/monitoring/README.md`).
+
 Read rows with `get(event_id)`, `list_records`, or the cursor-based `search`
 (filters: `received_at` window, `topic`, `event_kind`, `reason`, `user_id`).
 Every unrecognized line is kept, so plan retention if the topic carries a lot of

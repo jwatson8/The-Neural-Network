@@ -5,6 +5,7 @@ from math import isclose
 from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
 
 from src.data_quality.drift import EVENT_TYPES
+from src.database.schemas import REJECTION_REASONS
 
 
 def _normalize_utc(value: datetime, field_name: str) -> datetime:
@@ -260,6 +261,36 @@ class AvailabilitySummary(BaseModel):
         return self
 
 
+class RejectionSummary(BaseModel):
+    """Kafka course-log records consumed and rejected, by rejection reason.
+
+    ``kafka_record_count`` is every record the consumer handled in the bucket,
+    accepted or rejected, so ``total_count / kafka_record_count`` is the
+    rejection rate.
+    """
+
+    kafka_record_count: int = Field(default=0, ge=0)
+    invalid_encoding_count: int = Field(default=0, ge=0)
+    malformed_line_count: int = Field(default=0, ge=0)
+    unrecognized_event_count: int = Field(default=0, ge=0)
+    invalid_user_id_count: int = Field(default=0, ge=0)
+    invalid_event_time_count: int = Field(default=0, ge=0)
+    invalid_field_count: int = Field(default=0, ge=0)
+    unknown_movie_count: int = Field(default=0, ge=0)
+
+    @property
+    def total_count(self) -> int:
+        return sum(
+            getattr(self, f"{reason}_count") for reason in REJECTION_REASONS
+        )
+
+    @model_validator(mode="after")
+    def check_total(self):
+        if self.total_count > self.kafka_record_count:
+            raise ValueError("rejections cannot exceed kafka_record_count")
+        return self
+
+
 class MonitorResult(BaseModel):
     """Complete monitoring payload for one evaluation window."""
 
@@ -271,6 +302,7 @@ class MonitorResult(BaseModel):
     latency: LatencySummary = Field(default_factory=LatencySummary)
     drift: DriftSummary = Field(default_factory=DriftSummary)
     availability: AvailabilitySummary = Field(default_factory=AvailabilitySummary)
+    rejections: RejectionSummary = Field(default_factory=RejectionSummary)
 
     @field_validator("generated_at")
     @classmethod

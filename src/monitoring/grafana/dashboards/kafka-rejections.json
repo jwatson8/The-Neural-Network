@@ -1,0 +1,342 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "monitoring-postgres"
+      },
+      "description": "Share of consumed Kafka course-log records that were rejected. Consumed records are stream events (by storage time), recommendation-request lines and rejected lines (by receive time). The rolling 15-minute rate is what the alerts use: warning above 10%, critical above 20%, held for 5 minutes, and only when the window has at least 100 consumed records. Null when there is no traffic.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 16,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "monitoring-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH buckets AS (SELECT window_end AS time, rejected_total_count::double precision AS rejected, kafka_record_count::double precision AS consumed FROM monitoring_runs WHERE window_end >= CAST($__timeFrom() AS timestamptz) - INTERVAL '15 minutes' AND window_end <= CAST($__timeTo() AS timestamptz) AND window_end = window_start + INTERVAL '5 minutes'), series AS (SELECT time, rejected, consumed, SUM(rejected) OVER (ORDER BY time RANGE BETWEEN INTERVAL '10 minutes' PRECEDING AND CURRENT ROW) AS rolling_rejected, SUM(consumed) OVER (ORDER BY time RANGE BETWEEN INTERVAL '10 minutes' PRECEDING AND CURRENT ROW) AS rolling_consumed FROM buckets) SELECT time, CASE WHEN consumed = 0 THEN NULL ELSE rejected / consumed END AS \"5-minute rejection rate\", CASE WHEN rolling_consumed < 100 THEN NULL ELSE rolling_rejected / rolling_consumed END AS \"Rolling 15-minute rate (alerted)\" FROM series WHERE time >= CAST($__timeFrom() AS timestamptz) ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Rejection Rate: 5-Minute and Rolling 15-Minute",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "monitoring-postgres"
+      },
+      "description": "Total rejected Kafka records across completed five-minute buckets in the last 24 hours.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "monitoring-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(SUM(rejected_total_count), 0)::double precision AS \"Rejected (24h)\" FROM monitoring_runs WHERE window_end > NOW() - INTERVAL '24 hours' AND window_end = window_start + INTERVAL '5 minutes'",
+          "refId": "A"
+        }
+      ],
+      "title": "Rejected Records (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "monitoring-postgres"
+      },
+      "description": "Rejected records divided by consumed records over the last 24 hours. Null with no traffic.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 4
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "monitoring-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT SUM(rejected_total_count)::double precision / NULLIF(SUM(kafka_record_count), 0) AS \"Rejection rate (24h)\" FROM monitoring_runs WHERE window_end > NOW() - INTERVAL '24 hours' AND window_end = window_start + INTERVAL '5 minutes'",
+          "refId": "A"
+        }
+      ],
+      "title": "Rejection Rate (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "monitoring-postgres"
+      },
+      "description": "Rejected Kafka records per completed five-minute bucket, stacked by reason. A jump in malformed or unrecognized lines usually means the upstream log format changed. Individual lines are in the rejected_requests table.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "drawStyle": "bars",
+            "fillOpacity": 80
+          },
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "monitoring-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT window_end AS time, rejected_invalid_encoding_count::double precision AS \"Invalid encoding\", rejected_malformed_line_count::double precision AS \"Malformed line\", rejected_unrecognized_event_count::double precision AS \"Unrecognized event\", rejected_invalid_user_id_count::double precision AS \"Invalid user ID\", rejected_invalid_event_time_count::double precision AS \"Invalid event time\", rejected_invalid_field_count::double precision AS \"Invalid field\", rejected_unknown_movie_count::double precision AS \"Unknown movie\" FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes' ORDER BY window_end",
+          "refId": "A"
+        }
+      ],
+      "title": "Rejections by Reason",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "monitoring-postgres"
+      },
+      "description": "Kafka course-log records consumed and rejected per completed five-minute bucket, for context on the rejection rate.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "monitoring-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT window_end AS time, kafka_record_count::double precision AS \"Consumed records\", rejected_total_count::double precision AS \"Rejected records\" FROM monitoring_runs WHERE $__timeFilter(window_end) AND window_end = window_start + INTERVAL '5 minutes' ORDER BY window_end",
+          "refId": "A"
+        }
+      ],
+      "title": "Consumed vs Rejected Records",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 42,
+  "tags": [
+    "monitoring",
+    "kafka"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Kafka Rejections",
+  "uid": "kafka-rejections",
+  "version": 1
+}

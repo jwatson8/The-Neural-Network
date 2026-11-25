@@ -420,6 +420,25 @@ class MonitoringRun(SQLModel, table=True):
             "availability_other_failure_count = availability_request_count",
             name="ck_monitoring_availability_counts",
         ),
+        CheckConstraint(
+            "kafka_record_count >= 0 AND "
+            "rejected_invalid_encoding_count >= 0 AND "
+            "rejected_malformed_line_count >= 0 AND "
+            "rejected_unrecognized_event_count >= 0 AND "
+            "rejected_invalid_user_id_count >= 0 AND "
+            "rejected_invalid_event_time_count >= 0 AND "
+            "rejected_invalid_field_count >= 0 AND "
+            "rejected_unknown_movie_count >= 0 AND "
+            "rejected_invalid_encoding_count + "
+            "rejected_malformed_line_count + "
+            "rejected_unrecognized_event_count + "
+            "rejected_invalid_user_id_count + "
+            "rejected_invalid_event_time_count + "
+            "rejected_invalid_field_count + "
+            "rejected_unknown_movie_count = "
+            "rejected_total_count AND rejected_total_count <= kafka_record_count",
+            name="ck_monitoring_rejection_counts",
+        ),
         Index("ix_monitoring_runs_window", "window_start", "window_end"),
     )
 
@@ -461,6 +480,16 @@ class MonitoringRun(SQLModel, table=True):
     availability_success_count: int = Field(default=0, ge=0)
     availability_no_response_count: int = Field(default=0, ge=0)
     availability_other_failure_count: int = Field(default=0, ge=0)
+    # Kafka course-log records consumed and rejected; see rejected_requests.
+    kafka_record_count: int = Field(default=0, ge=0)
+    rejected_invalid_encoding_count: int = Field(default=0, ge=0)
+    rejected_malformed_line_count: int = Field(default=0, ge=0)
+    rejected_unrecognized_event_count: int = Field(default=0, ge=0)
+    rejected_invalid_user_id_count: int = Field(default=0, ge=0)
+    rejected_invalid_event_time_count: int = Field(default=0, ge=0)
+    rejected_invalid_field_count: int = Field(default=0, ge=0)
+    rejected_unknown_movie_count: int = Field(default=0, ge=0)
+    rejected_total_count: int = Field(default=0, ge=0)
 
 
 class MonitoringModelAccuracy(SQLModel, table=True):
