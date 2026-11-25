@@ -14,6 +14,7 @@ from src.monitoring.schemas import (
     LatencySummary,
     MonitoringConfig,
     QualitySummary,
+    RejectionSummary,
 )
 
 
@@ -43,6 +44,9 @@ class MonitoringWorkloadTests(unittest.TestCase):
         self.drift = DriftSummary()
         self.availability = AvailabilitySummary(
             request_count=4, success_count=3, no_response_count=1
+        )
+        self.rejections = RejectionSummary(
+            kafka_record_count=10, malformed_line_count=2, unknown_movie_count=1
         )
 
     def _summaries(self, value):
@@ -77,6 +81,10 @@ class MonitoringWorkloadTests(unittest.TestCase):
             "calculate_availability_buckets",
             side_effect=self._summaries(self.availability),
         ), patch.object(
+            workload,
+            "calculate_rejection_buckets",
+            side_effect=self._summaries(self.rejections),
+        ), patch.object(
             workload.monitoring_runs, "upsert_many", return_value=saved
         ) as upsert:
             returned = workload.run_monitoring_workload(self.config)
@@ -91,6 +99,7 @@ class MonitoringWorkloadTests(unittest.TestCase):
         self.assertTrue(
             all(result.availability == self.availability for result in results)
         )
+        self.assertTrue(all(result.rejections == self.rejections for result in results))
 
     def test_existing_history_still_reconciles_only_the_latest_hour(self):
         config = MonitoringConfig(backfill_hours=2)

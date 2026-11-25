@@ -24,6 +24,11 @@ datasource. It refreshes hourly to avoid repeating full-table counts on the
 30-second operational monitoring dashboard. It does not expand the PostgreSQL
 reader's permissions beyond the monitoring tables.
 
+The **Kafka Rejections** dashboard shows the share of consumed Kafka course-log
+records the consumer rejected, and the counts by reason, from `monitoring_runs`.
+Its alerts fire when the rolling 15-minute rate is above 10% (warning) or 20%
+(critical) with at least 100 records consumed.
+
 View service logs with:
 
 ```sh

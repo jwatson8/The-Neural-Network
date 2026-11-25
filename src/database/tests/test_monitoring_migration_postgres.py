@@ -163,6 +163,15 @@ class MonitoringMigrationPostgresTests(unittest.TestCase):
                 "availability_success_count",
                 "availability_no_response_count",
                 "availability_other_failure_count",
+                "kafka_record_count",
+                "rejected_invalid_encoding_count",
+                "rejected_malformed_line_count",
+                "rejected_unrecognized_event_count",
+                "rejected_invalid_user_id_count",
+                "rejected_invalid_event_time_count",
+                "rejected_invalid_field_count",
+                "rejected_unknown_movie_count",
+                "rejected_total_count",
             }
             <= columns
         )

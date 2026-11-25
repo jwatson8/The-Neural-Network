@@ -10,6 +10,7 @@ from src.monitoring.calculations import (
     calculate_license_fee_buckets,
     calculate_live_model_accuracy_buckets,
     calculate_llm_buckets,
+    calculate_rejection_buckets,
     calculate_request_latency_buckets,
 )
 from src.monitoring.schemas import MonitoringConfig, MonitorResult
@@ -58,6 +59,7 @@ def run_monitoring_workload(config: MonitoringConfig):
     latency = calculate_request_latency_buckets(windows, config)
     drift = calculate_data_drift_buckets(windows, config)
     availability = calculate_availability_buckets(windows, config)
+    rejections = calculate_rejection_buckets(windows, config)
     results = [
         MonitorResult(
             generated_at=generated_at,
@@ -68,6 +70,7 @@ def run_monitoring_workload(config: MonitoringConfig):
             latency=latency[window.start],
             drift=drift[window.start],
             availability=availability[window.start],
+            rejections=rejections[window.start],
         )
         for window in windows
     ]

@@ -1,12 +1,20 @@
 """Validated input objects accepted by the database interaction layer."""
 
+import re
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from math import isnan
-from typing import Any, Literal
-from uuid import UUID
+from typing import Any, Literal, get_args
+from uuid import NAMESPACE_URL, UUID, uuid5
 
-from pydantic import ConfigDict, FiniteFloat, StrictBool, field_validator, model_validator
+from pydantic import (
+    ConfigDict,
+    FiniteFloat,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 from sqlmodel import Field, SQLModel
 
 
@@ -202,7 +210,9 @@ class RecommendationItem(DatabaseSchema):
     @classmethod
     def reject_boolean_score(cls, value):
         if isinstance(value, bool):
-            raise ValueError("model_score must be a finite number in [-1, 1], not a boolean")
+            raise ValueError(
+                "model_score must be a finite number in [-1, 1], not a boolean"
+            )
         return value
 
 
@@ -229,6 +239,132 @@ class RecommendationServeCreate(DatabaseSchema):
     def validate_timing(self):
         if self.served_at < self.request_received_at:
             raise ValueError("served_at cannot precede request_received_at")
+        return self
+
+
+RejectionReason = Literal[
+    "invalid_encoding",
+    "malformed_line",
+    "unrecognized_event",
+    "invalid_user_id",
+    "invalid_event_time",
+    "invalid_field",
+    "unknown_movie",
+]
+# Monitoring keeps one count column per reason; add a column when adding one here.
+REJECTION_REASONS: tuple[str, ...] = get_args(RejectionReason)
+RAW_LINE_LIMIT = 1024
+_DETAIL_TEXT_LIMIT = 500
+
+
+def _storable_text(value: str) -> str:
+    """Escape what PostgreSQL text cannot hold (NUL, lone surrogates) visibly."""
+    return (
+        value.encode("utf-8", "backslashreplace")
+        .decode("utf-8")
+        .replace("\x00", "\\x00")
+    )
+
+
+def _rejection_error_detail(error: object) -> dict[str, Any]:
+    if not isinstance(error, Mapping):
+        raise ValueError("Each error must be a mapping with loc and type")
+    location, error_type, message = (
+        error.get("loc"),
+        error.get("type"),
+        error.get("msg"),
+    )
+    if not isinstance(location, (list, tuple)) or not all(
+        isinstance(part, (str, int)) and not isinstance(part, bool) for part in location
+    ):
+        raise ValueError("Each error needs a loc sequence of names or indexes")
+    if not isinstance(error_type, str) or not error_type:
+        raise ValueError("Each error needs a non-empty string type")
+    if message is not None and not isinstance(message, str):
+        raise ValueError("Error msg must be a string when present")
+    detail = {
+        "loc": [
+            _storable_text(part)[:100] if isinstance(part, str) else part
+            for part in location
+        ],
+        "type": _storable_text(error_type)[:100],
+    }
+    if message is not None:
+        detail["msg"] = _storable_text(message)[:_DETAIL_TEXT_LIMIT]
+    return detail
+
+
+class RejectedRequestCreate(DatabaseSchema):
+    """One Kafka course-log record the consumer rejected, keyed by its position."""
+
+    topic: str = Field(min_length=1, max_length=255)
+    partition_id: int = Field(ge=0)
+    offset_id: int = Field(ge=0)
+    received_at: datetime | None = None
+    event_time: datetime | None = None
+    event_kind: Literal["account", "watch", "rating", "recommendation", "unknown"] = (
+        "unknown"
+    )
+    reason: RejectionReason
+    user_id: str | None = None
+    error_details: list[dict] = Field(default_factory=list)
+    raw_line: str
+    raw_line_truncated: bool = False
+
+    @property
+    def event_id(self) -> UUID:
+        """Same uuid5 the consumer gives stream events from this Kafka position."""
+        return uuid5(
+            NAMESPACE_URL, f"kafka:{self.topic}:{self.partition_id}:{self.offset_id}"
+        )
+
+    @field_validator("partition_id", "offset_id", mode="before")
+    @classmethod
+    def require_integer_position(cls, value):
+        if type(value) is not int:
+            raise ValueError("Kafka positions must be integers")
+        return value
+
+    @field_validator("raw_line", mode="before")
+    @classmethod
+    def decode_raw_line(cls, value):
+        # Undecodable Kafka payloads are kept with their bad bytes escaped.
+        if isinstance(value, (bytes, bytearray)):
+            value = bytes(value).decode("utf-8", "backslashreplace")
+        if not isinstance(value, str):
+            raise ValueError("raw_line must be text or bytes")
+        return _storable_text(value)
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def keep_user_id_as_given(cls, value):
+        # Stored even when invalid, so malformed identifiers can be diagnosed.
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("user_id must be text")
+        return _storable_text(value)[:255]
+
+    @field_validator("error_details", mode="before")
+    @classmethod
+    def normalize_error_details(cls, value):
+        if value is None:
+            return []
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("error_details must be a list of structured errors")
+        return [_rejection_error_detail(error) for error in value]
+
+    @model_validator(mode="after")
+    def normalize(self):
+        for name in ("received_at", "event_time"):
+            value = getattr(self, name)
+            if value is not None:
+                if value.utcoffset() is None:
+                    raise ValueError(f"{name} must include a timezone")
+                setattr(self, name, value.astimezone(UTC))
+        if len(self.raw_line) > RAW_LINE_LIMIT:
+            self.raw_line = self.raw_line[:RAW_LINE_LIMIT]
+            self.raw_line_truncated = True
         return self
 
 
@@ -276,11 +412,21 @@ class ExperimentCreate(DatabaseSchema):
     control_version: str = Field(min_length=1, max_length=255)
     treatment_policy: str = Field(min_length=1, max_length=255)
     treatment_version: str = Field(min_length=1, max_length=255)
-    traffic_allocation: Decimal = Field(default=Decimal("0"), ge=0, le=1, max_digits=7, decimal_places=6)
-    treatment_allocation: Decimal = Field(default=Decimal("0.5"), ge=0, le=1, max_digits=7, decimal_places=6)
+    traffic_allocation: Decimal = Field(
+        default=Decimal("0"), ge=0, le=1, max_digits=7, decimal_places=6
+    )
+    treatment_allocation: Decimal = Field(
+        default=Decimal("0.5"), ge=0, le=1, max_digits=7, decimal_places=6
+    )
     config: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("name", "control_policy", "control_version", "treatment_policy", "treatment_version")
+    @field_validator(
+        "name",
+        "control_policy",
+        "control_version",
+        "treatment_policy",
+        "treatment_version",
+    )
     @classmethod
     def nonblank(cls, value):
         if not value.strip():
@@ -289,10 +435,18 @@ class ExperimentCreate(DatabaseSchema):
 
     @model_validator(mode="after")
     def validate_times(self):
-        _normalize_experiment_times(self, ("created_at", "updated_at", "starts_at", "ends_at"))
-        if self.ends_at is not None and (self.starts_at is None or self.ends_at <= self.starts_at):
+        _normalize_experiment_times(
+            self, ("created_at", "updated_at", "starts_at", "ends_at")
+        )
+        if self.ends_at is not None and (
+            self.starts_at is None or self.ends_at <= self.starts_at
+        ):
             raise ValueError("ends_at requires starts_at and must be later")
-        if self.created_at is not None and self.updated_at is not None and self.updated_at < self.created_at:
+        if (
+            self.created_at is not None
+            and self.updated_at is not None
+            and self.updated_at < self.created_at
+        ):
             raise ValueError("updated_at cannot precede created_at")
         return self
 
@@ -332,7 +486,9 @@ class ExperimentReportCreate(DatabaseSchema):
     generated_at: datetime | None = None
     window_start: datetime
     window_end: datetime
-    status: Literal["provisional", "final", "insufficient_data", "failed"] = "provisional"
+    status: Literal["provisional", "final", "insufficient_data", "failed"] = (
+        "provisional"
+    )
     results: dict[str, Any] = Field(default_factory=dict)
     analysis_version: str = Field(min_length=1, max_length=255)
 
@@ -345,7 +501,9 @@ class ExperimentReportCreate(DatabaseSchema):
 
     @model_validator(mode="after")
     def validate_times(self):
-        _normalize_experiment_times(self, ("generated_at", "window_start", "window_end"))
+        _normalize_experiment_times(
+            self, ("generated_at", "window_start", "window_end")
+        )
         if self.window_end <= self.window_start:
             raise ValueError("window_end must be later than window_start")
         return self

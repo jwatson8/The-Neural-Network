@@ -246,3 +246,135 @@ groups:
           __panelId__: "5"
         labels: {service: recommendation-api, severity: critical}
         isPaused: false
+
+      - uid: kafka-rejection-rate-warning
+        title: Kafka rejection rate is elevated
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 1200, to: 0}
+            datasourceUid: monitoring-postgres
+            model:
+              datasource: {type: grafana-postgresql-datasource, uid: monitoring-postgres}
+              editorMode: code
+              format: table
+              intervalMs: 1000
+              maxDataPoints: 43200
+              rawQuery: true
+              rawSql: >-
+                WITH boundary AS (
+                  SELECT date_bin('5 minutes', NOW(), TIMESTAMPTZ '1970-01-01') AS bucket_end
+                ), recent AS (
+                  SELECT SUM(rejected_total_count)::double precision AS rejected,
+                    SUM(kafka_record_count)::double precision AS consumed
+                  FROM monitoring_runs CROSS JOIN boundary
+                  WHERE window_end > boundary.bucket_end - INTERVAL '15 minutes'
+                  AND window_end <= boundary.bucket_end
+                  AND window_end = window_start + INTERVAL '5 minutes'
+                )
+                SELECT CASE WHEN consumed >= 100 THEN rejected / consumed ELSE NULL END AS value
+                FROM recent
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [0.1, 0.2], type: within_range}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: kafka-rejections
+        panelId: 1
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: Over 10% of consumed Kafka records were rejected in the last 15 minutes
+          description: Between 10% and 20% of the at least 100 Kafka course-log records consumed in the last three completed buckets were rejected, for 5 minutes. Check Rejections by Reason for an upstream format change.
+          __dashboardUid__: kafka-rejections
+          __panelId__: "1"
+        labels: {service: kafka-consumer, severity: warning}
+        isPaused: false
+
+      - uid: kafka-rejection-rate-critical
+        title: Kafka rejection rate is high
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 1200, to: 0}
+            datasourceUid: monitoring-postgres
+            model:
+              datasource: {type: grafana-postgresql-datasource, uid: monitoring-postgres}
+              editorMode: code
+              format: table
+              intervalMs: 1000
+              maxDataPoints: 43200
+              rawQuery: true
+              rawSql: >-
+                WITH boundary AS (
+                  SELECT date_bin('5 minutes', NOW(), TIMESTAMPTZ '1970-01-01') AS bucket_end
+                ), recent AS (
+                  SELECT SUM(rejected_total_count)::double precision AS rejected,
+                    SUM(kafka_record_count)::double precision AS consumed
+                  FROM monitoring_runs CROSS JOIN boundary
+                  WHERE window_end > boundary.bucket_end - INTERVAL '15 minutes'
+                  AND window_end <= boundary.bucket_end
+                  AND window_end = window_start + INTERVAL '5 minutes'
+                )
+                SELECT CASE WHEN consumed >= 100 THEN rejected / consumed ELSE NULL END AS value
+                FROM recent
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource: {type: __expr__, uid: __expr__}
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: {params: [0.2], type: gt}
+                  operator: {type: and}
+                  query: {params: [C]}
+                  reducer: {params: [], type: last}
+                  type: query
+              datasource: {type: __expr__, uid: __expr__}
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: kafka-rejections
+        panelId: 1
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: Over 20% of consumed Kafka records were rejected in the last 15 minutes
+          description: More than 20% of the at least 100 Kafka course-log records consumed in the last three completed buckets were rejected, for 5 minutes. Check Rejections by Reason for an upstream format change.
+          __dashboardUid__: kafka-rejections
+          __panelId__: "1"
+        labels: {service: kafka-consumer, severity: critical}
+        isPaused: false

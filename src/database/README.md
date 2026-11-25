@@ -7,13 +7,13 @@ and Psycopg.
 
 ## Organization
 
-The database is organized by table and table-specific interactions. There are 18 tables:
+The database is organized by table and table-specific interactions. There are 19 tables:
 
 `stream_events`, `course_requests`, `user_movie_history`, `recommendation_serves`, `users`,
 `llm_usage`, `movies`, `cold_start_jobs`, `cold_start_profiles`,
 `data_quality_logs`, `model_logs`, `licensing_costs`, `monitoring_runs`,
-`monitoring_model_accuracy`, `monitoring_route_latency`, `experiments`, `experiment_assignments`, and
-`experiment_reports`.
+`monitoring_model_accuracy`, `monitoring_route_latency`, `experiments`, `experiment_assignments`,
+`experiment_reports`, and `rejected_requests`.
 
 Tables have a corresponding module under `src/database/interactions`, except
 `monitoring_model_accuracy` and `monitoring_route_latency`, whose child rows are managed atomically through the
@@ -92,8 +92,8 @@ when their event time is at least 24 hours after the preceding accepted watch.
 ## Search Functionality
 
 The append-only tables are `stream_events`, `course_requests`, `licensing_costs`,
-`recommendation_serves`, `llm_usage`, `data_quality_logs`, `model_logs`, and
-`monitoring_runs`.
+`recommendation_serves`, `llm_usage`, `data_quality_logs`, `model_logs`,
+`monitoring_runs`, and `rejected_requests`.
 
 Immutable interaction records can be searched in bounded pages. One intended use is
 a daily incremental job. In that case, use the stream event storage time so late
@@ -149,6 +149,49 @@ Every public function in `interactions/` documents its inputs, result, and behav
 for editor hover help. Application and automation code should import these table
 modules from `src.database.interactions`; it should not import SQLModel tables or
 functions whose names begin with an underscore.
+
+## Rejected Kafka Records
+
+`rejected_requests` stores one row per course-log record the Kafka consumer
+could not accept, including lines too malformed to identify. Each row is keyed by
+its Kafka position (`topic`, `partition_id`, `offset_id`); its `event_id` is the
+same `uuid5` the consumer derives for stream events, so it lines up with
+`data_quality_logs.event_id`. Rows keep the original line (escaped where it is not
+valid UTF-8, truncated to 1 KiB with `raw_line_truncated` set), the user ID
+exactly as sent even when invalid, the parsed event time when there is one, an
+`event_kind` (`account`, `watch`, `rating`, `recommendation`, `unknown`), a
+`reason`, and the structured errors (`loc`, `type`, `msg`).
+
+Reasons: `invalid_encoding`, `malformed_line` (not `time,user,event`),
+`unrecognized_event`, `invalid_user_id`, `invalid_event_time`, `invalid_field`
+(schema validation failed), and `unknown_movie`.
+
+The consumer does not write these rows yet. When it does, it should call
+`create_many` once per poll, before `consumer.commit()`, and let database errors
+propagate like the other batch writes so the poll is retried. Writes are
+idempotent per Kafka position, so replaying an uncommitted poll adds nothing.
+
+```python
+from src.database.interactions import rejected_requests
+
+rejected_requests.create_many([
+    {"topic": record.topic, "partition_id": record.partition,
+     "offset_id": record.offset, "raw_line": record.value,
+     "reason": "invalid_user_id", "event_kind": "watch",
+     "user_id": user_id, "event_time": parsed_time, "error_details": errors},
+])
+```
+
+The monitoring worker counts these rows per five-minute bucket, by reason, into
+`monitoring_runs`, where the Grafana **Kafka Rejections** dashboard and its alerts
+read them (see `src/monitoring/README.md`).
+
+Read rows with `get(event_id)`, `list_records`, or the cursor-based `search`
+(filters: `received_at` window, `topic`, `event_kind`, `reason`, `user_id`).
+Every unrecognized line is kept, so plan retention if the topic carries a lot of
+unrelated traffic.
+
+Existing databases get the table from `python -m src.database.migrations.apply_all --apply`.
 
 ## Initial Data Roll Up
 

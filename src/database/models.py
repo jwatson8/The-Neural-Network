@@ -308,6 +308,43 @@ class RecommendationServe(SQLModel, table=True):
     serve_duration_ms: float = Field(ge=0)
 
 
+class RejectedRequest(SQLModel, table=True):
+    """One Kafka course-log record the consumer could not accept, kept verbatim."""
+
+    __tablename__ = "rejected_requests"
+    __table_args__ = (
+        UniqueConstraint(
+            "topic", "partition_id", "offset_id", name="uq_rejected_requests_offset"
+        ),
+        CheckConstraint("partition_id >= 0", name="ck_rejected_request_partition"),
+        CheckConstraint("offset_id >= 0", name="ck_rejected_request_offset"),
+    )
+
+    # uuid5 of the Kafka position, identical to the consumer's stream event_id.
+    event_id: UUID = Field(primary_key=True)
+    topic: str = Field(max_length=255)
+    partition_id: int = Field(ge=0)
+    offset_id: int = Field(ge=0, sa_type=BigInteger)
+    received_at: datetime = Field(
+        default_factory=utc_now,
+        sa_type=DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+    event_time: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True), nullable=True
+    )
+    event_kind: str = Field(max_length=20, index=True)
+    reason: str = Field(max_length=50, index=True)
+    # Deliberately not a foreign key: the value may be malformed or unknown.
+    user_id: str | None = Field(default=None, max_length=255, index=True)
+    error_details: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON_DOCUMENT, nullable=False)
+    )
+    raw_line: str = Field(sa_type=Text, nullable=False)
+    raw_line_truncated: bool = Field(default=False)
+
+
 class LLMUsage(SQLModel, table=True):
     __tablename__ = "llm_usage"
     __table_args__ = (
@@ -383,6 +420,25 @@ class MonitoringRun(SQLModel, table=True):
             "availability_other_failure_count = availability_request_count",
             name="ck_monitoring_availability_counts",
         ),
+        CheckConstraint(
+            "kafka_record_count >= 0 AND "
+            "rejected_invalid_encoding_count >= 0 AND "
+            "rejected_malformed_line_count >= 0 AND "
+            "rejected_unrecognized_event_count >= 0 AND "
+            "rejected_invalid_user_id_count >= 0 AND "
+            "rejected_invalid_event_time_count >= 0 AND "
+            "rejected_invalid_field_count >= 0 AND "
+            "rejected_unknown_movie_count >= 0 AND "
+            "rejected_invalid_encoding_count + "
+            "rejected_malformed_line_count + "
+            "rejected_unrecognized_event_count + "
+            "rejected_invalid_user_id_count + "
+            "rejected_invalid_event_time_count + "
+            "rejected_invalid_field_count + "
+            "rejected_unknown_movie_count = "
+            "rejected_total_count AND rejected_total_count <= kafka_record_count",
+            name="ck_monitoring_rejection_counts",
+        ),
         Index("ix_monitoring_runs_window", "window_start", "window_end"),
     )
 
@@ -424,6 +480,16 @@ class MonitoringRun(SQLModel, table=True):
     availability_success_count: int = Field(default=0, ge=0)
     availability_no_response_count: int = Field(default=0, ge=0)
     availability_other_failure_count: int = Field(default=0, ge=0)
+    # Kafka course-log records consumed and rejected; see rejected_requests.
+    kafka_record_count: int = Field(default=0, ge=0)
+    rejected_invalid_encoding_count: int = Field(default=0, ge=0)
+    rejected_malformed_line_count: int = Field(default=0, ge=0)
+    rejected_unrecognized_event_count: int = Field(default=0, ge=0)
+    rejected_invalid_user_id_count: int = Field(default=0, ge=0)
+    rejected_invalid_event_time_count: int = Field(default=0, ge=0)
+    rejected_invalid_field_count: int = Field(default=0, ge=0)
+    rejected_unknown_movie_count: int = Field(default=0, ge=0)
+    rejected_total_count: int = Field(default=0, ge=0)
 
 
 class MonitoringModelAccuracy(SQLModel, table=True):
