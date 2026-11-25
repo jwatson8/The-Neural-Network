@@ -4,7 +4,11 @@ import argparse
 
 from sqlalchemy import Engine
 
-from src.database.migrations import add_experimentation_schema, add_monitoring_schema
+from src.database.migrations import (
+    add_experimentation_schema,
+    add_monitoring_schema,
+    add_rejected_requests_schema,
+)
 
 
 def migrate_all(engine: Engine, *, bootstrap_if_empty: bool = False) -> None:
@@ -13,6 +17,7 @@ def migrate_all(engine: Engine, *, bootstrap_if_empty: bool = False) -> None:
         engine, bootstrap_if_empty=bootstrap_if_empty
     )
     add_monitoring_schema.migrate(engine)
+    add_rejected_requests_schema.migrate(engine)
 
 
 def main() -> None:
